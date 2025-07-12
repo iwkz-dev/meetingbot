@@ -2,16 +2,17 @@ import 'dotenv/config';
 import express from 'express';
 import { createBot } from './BotService';
 import { MeetingType } from './types';
+import path from 'path';
 
 const app = express();
 const port = process.env.PORT || 3003;
-const folder = process.env.GDRIVE_FOLDER_MEETING!;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+app.use(express.static(path.join(__dirname, '../src')));
 
-app.get('/', async (reg, res) => {
-    res.send('Hello World!');
+app.get('', async (req, res) => {
+    res.sendFile(path.join(__dirname, 'views/invite-form.html'));
 });
 
 app.post('/invite-bot', async (reg, res) => {
