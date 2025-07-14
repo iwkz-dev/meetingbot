@@ -8,6 +8,8 @@ const joinButton = 'button.zm-btn.preview-join-button';
 const leaveButton = '.footer__leave-btn-container';
 const acceptCookiesButton = '#onetrust-accept-btn-handler';
 const acceptTermsButton = '#wc_agree1';
+const okButton =
+    'button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue';
 
 export default class HandlerZoom implements MeetingHandlerInterface {
     botSettings: BotConfig;
@@ -128,8 +130,8 @@ export default class HandlerZoom implements MeetingHandlerInterface {
         if (frame) {
             console.log('Check is meeting ended...');
 
+            // Checking if Leave buttons is present which indicates the meeting is still running
             try {
-                // Checking if Leave buttons is present which indicates the meeting is still running
                 await frame?.waitForSelector(leaveButton, { timeout: 1000 });
 
                 console.log('leave button is exist, meeting still on going!');
@@ -138,6 +140,21 @@ export default class HandlerZoom implements MeetingHandlerInterface {
                 console.error(error);
 
                 return true;
+            }
+
+            //OK Button Exist
+            try {
+                const okBtnElement = await frame?.waitForSelector(okButton, {
+                    timeout: 1000,
+                });
+
+                if (okButton) {
+                    await okBtnElement.click();
+
+                    console.log('OK button exist and click!');
+                }
+            } catch (error) {
+                console.error(error);
             }
         } else {
             console.error('frame is not created!');
