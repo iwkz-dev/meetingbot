@@ -5,7 +5,7 @@ import { MeetingHandlerInterface } from './MeetingService';
 const muteButton = '#preview-audio-control-button';
 const stopVideoButton = '#preview-video-control-button';
 const joinButton = 'button.zm-btn.preview-join-button';
-const leaveButton = `//button[@aria-label="Verlassen"]`;
+const leaveButton = `//button[@aria-label="Leave"]`;
 //const leaveButton = 'button[aria-label="Verlassen"]';
 const acceptCookiesButton = '#onetrust-accept-btn-handler';
 const acceptTermsButton = '#wc_agree1';
