@@ -154,16 +154,16 @@ export default class HandlerZoom implements MeetingHandlerInterface {
             return true;
         }
 
-        console.log('Checking for hidden leave button ...');
-        // Hidden Leave Button (Kick Condition 2)
-        if (
-            await this.page
-                .locator(leaveButton)
-                .isHidden({ timeout: 500 })
-                .catch(() => true)
-        ) {
-            return true;
-        }
+        // console.log('Checking for hidden leave button ...');
+        // // Hidden Leave Button (Kick Condition 2)
+        // if (
+        //     await this.page
+        //         .locator(leaveButton)
+        //         .isHidden({ timeout: 500 })
+        //         .catch(() => true)
+        // ) {
+        //     return true;
+        // }
 
         console.log('Checking for removed from meeting text ...');
         // Removed from Meeting Text (Kick Condition 3)

@@ -1,14 +1,12 @@
 import { chromium } from 'playwright-extra';
 import { Browser, Page } from 'playwright';
-import { saveVideo, PageVideoCapture } from 'playwright-video';
-import { CaptureOptions } from 'playwright-video/build/PageVideoCapture';
+import { PageVideoCapture } from 'playwright-video';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { setTimeout } from 'timers/promises';
 import { BotConfig, MeetingPlatform } from './types';
 import * as fs from 'fs';
 import path from 'path';
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
-import { uploadFileToGDrive } from './GDriveUploader';
 import HandlerGMeet from './HandlerGMeet';
 import HandlerZoom from './HandlerZoom';
 
@@ -340,61 +338,69 @@ export class MeetingBot {
     async stopRecording() {
         console.log('Attempting to stop the recording ...');
 
-        // Await encoding result
-        const promiseResult = await new Promise((resolve) => {
-            // No recording
-            if (!this.ffmpegProcess) {
-                console.log('No recording in progress, cannot end recording.');
-                resolve(1);
-                return; // exit early
-            }
-
-            // Graceful stop
-            console.log('Killing ffmpeg process gracefully ...');
-            this.ffmpegProcess.kill('SIGINT');
-            console.log('Waiting for ffmpeg to finish encoding ...');
-
-            // Modify the exit handler to resolve the promise.
-            // This will be called when the video is done encoding
-            this.ffmpegProcess.on('exit', (code, signal) => {
-                if (code === 0) {
-                    console.log('Recording stopped and file finalized.');
-                    resolve(0);
-                } else {
-                    console.error(
-                        `FFmpeg exited with code ${code}${
-                            signal ? ` and signal ${signal}` : ''
-                        }`
+        try {
+            // Await encoding result
+            const promiseResult = await new Promise((resolve) => {
+                // No recording
+                if (!this.ffmpegProcess) {
+                    console.log(
+                        'No recording in progress, cannot end recording.'
                     );
                     resolve(1);
+                    return; // exit early
                 }
-            });
 
-            // Modify the error handler to resolve the promise.
-            this.ffmpegProcess.on('error', (err) => {
-                console.error('Error while stopping ffmpeg:', err);
-                resolve(1);
-            });
-        });
+                // Graceful stop
+                console.log('Killing ffmpeg process gracefully ...');
+                this.ffmpegProcess.kill('SIGINT');
+                console.log('Waiting for ffmpeg to finish encoding ...');
 
-        // Continue
-        return promiseResult;
+                // Modify the exit handler to resolve the promise.
+                // This will be called when the video is done encoding
+                this.ffmpegProcess.on('exit', (code, signal) => {
+                    if (code === 0) {
+                        console.log('Recording stopped and file finalized.');
+                        resolve(0);
+                    } else {
+                        console.error(
+                            `FFmpeg exited with code ${code}${
+                                signal ? ` and signal ${signal}` : ''
+                            }`
+                        );
+                        resolve(1);
+                    }
+                });
+
+                // Modify the error handler to resolve the promise.
+                this.ffmpegProcess.on('error', (err) => {
+                    console.error('Error while stopping ffmpeg:', err);
+                    resolve(1);
+                });
+            });
+            return promiseResult;
+        } catch (error) {
+            console.error(error);
+        }
     }
 
     async generateMp3Recording() {
         console.log('Attempting to generae mp3 file ...');
 
-        this.ffmpegProcess = spawn(
-            'ffmpeg',
-            this.getFFmpegMP3ConverterParams()
-        );
+        try {
+            this.ffmpegProcess = spawn(
+                'ffmpeg',
+                this.getFFmpegMP3ConverterParams()
+            );
 
-        // Report when the process exits
-        this.ffmpegProcess.on('exit', (code) => {
-            console.log(`done conver to mp3`);
-            console.log(`ffmpeg exited with code ${code}`);
-            this.ffmpegProcess = null;
-        });
+            // Report when the process exits
+            this.ffmpegProcess.on('exit', (code) => {
+                console.log(`done conver to mp3`);
+                console.log(`ffmpeg exited with code ${code}`);
+                this.ffmpegProcess = null;
+            });
+        } catch (error) {
+            console.error(error);
+        }
     }
 
     async screenshot(fName: string = 'screenshot.png') {
@@ -415,177 +421,27 @@ export class MeetingBot {
         }
     }
 
-    /**
-     * Check if a pop-up appeared. If so, close it.
-     */
-    // async handleInfoPopup(timeout = 5000) {
-    //     try {
-    //         await this.page.waitForSelector(infoPopupClick, { timeout });
-    //     } catch (e) {
-    //         return;
-    //     }
-    //     console.log('Clicking the popup...');
-    //     await this.page.click(infoPopupClick);
-    // }
-
-    /**
-     *
-     * Meeting actions of the bot.
-     *
-     * This function performs the actions that the bot is supposed to do in the meeting.
-     * It first waits for the people button to be visible, then clicks on it to open the people panel.
-     * It then starts recording the meeting and sets up participant monitoring.
-     *
-     * Afterwards, It enters a simple loop that checks for end meeting conditions every X seconds.
-     * Once detected it's done, it stops the recording and exits.
-     *
-     * @returns 0
-     */
     async meetingActions() {
         // Start Recording, Yes by default
         console.log('Starting Recording');
-        this.startRecording();
-
-        console.log(
-            "Waiting for the 'Others might see you differently' popup..."
-        );
-        // await this.handleInfoPopup();
-
-        // Monitor for participants joining
-        await this.page.exposeFunction(
-            'onParticipantJoin',
-            async (participantId: string) => {
-                console.log(`Participant joining meeting ${participantId}`);
-            }
-        );
-
-        // Monitor for participants leaving
-        await this.page.exposeFunction(
-            'onParticipantLeave',
-            async (participantId: string) => {
-                console.log(`Participant leaving meeting ${participantId}`);
-            }
-        );
-
-        // Expose function to update participant count
-        await this.page.exposeFunction(
-            'addParticipantCount',
-            (count: number) => {
-                this.participantCount += count;
-                console.log(
-                    'Updated Participant Count:',
-                    this.participantCount
-                );
-
-                if (this.participantCount == 1) {
-                    this.timeAloneStarted = Date.now();
-                } else {
-                    this.timeAloneStarted = Infinity;
-                }
-            }
-        );
-
-        // Add mutation observer for participant list
-        // Use in the browser context to monitor for participants joining and leaving
-        await this.page.evaluate(() => {
-            const peopleList = document.querySelector(
-                '[aria-label="Participants"]'
-            );
-            if (!peopleList) {
-                console.error('Could not find participants list element');
-                return;
-            }
-
-            // Initialize participant count
-            const initialParticipants = peopleList.querySelectorAll(
-                '[data-participant-id]'
-            ).length;
-            window.addParticipantCount(initialParticipants); // initially 0
-            console.log(`Initial participant count: ${initialParticipants}`);
-
-            // Set up mutation observer
-            console.log('Setting up mutation observer on participants list');
-            const observer = new MutationObserver((mutations) => {
-                mutations.forEach((mutation) => {
-                    if (mutation.type === 'childList') {
-                        mutation.addedNodes.forEach((node: any) => {
-                            if (
-                                node.getAttribute &&
-                                node.getAttribute('data-participant-id')
-                            ) {
-                                console.log(
-                                    'Participant joined:',
-                                    node.getAttribute('data-participant-id')
-                                );
-                                // @ts-ignore
-                                window.onParticipantJoin(
-                                    node.getAttribute('data-participant-id')
-                                );
-                                window.addParticipantCount(1);
-                            }
-                        });
-                        mutation.removedNodes.forEach((node: any) => {
-                            if (
-                                node.getAttribute &&
-                                node.getAttribute('data-participant-id')
-                            ) {
-                                console.log(
-                                    'Participant left:',
-                                    node.getAttribute('data-participant-id')
-                                );
-                                // @ts-ignore
-                                window.onParticipantLeave(
-                                    node.getAttribute('data-participant-id')
-                                );
-                                window.addParticipantCount(-1);
-                            }
-                        });
-                    }
-                });
-            });
-            observer.observe(peopleList, { childList: true, subtree: true });
-        });
+        //this.startRecording();
 
         // Loop -- check for end meeting conditions every second
         console.log('Waiting until a leave condition is fulfilled..');
+
         while (true) {
-            // Check if it's only me in the meeting
-            console.log(
-                'Checking if 1 Person Remaining ...',
-                this.participantCount
-            );
-            if (this.participantCount === 1) {
-                const leaveMs =
-                    this.botSettings?.automaticLeave?.everyoneLeftTimeout ??
-                    30000; // Default to 30 seconds if not set
-                const msDiff = Date.now() - this.timeAloneStarted;
-                console.log(
-                    `Only me left in the meeting. Waiting for timeout time to have allocated (${
-                        msDiff / 1000
-                    } / ${leaveMs / 1000}s) ...`
-                );
+            console.log('Checking meeting status...');
 
-                if (msDiff > leaveMs) {
-                    console.log(
-                        'Only one participant remaining for more than alocated time, leaving the meeting.'
-                    );
-                    break;
-                }
-            }
-
-            // Got kicked -- no longer in the meeting
-            // Check each of the potentials conditions
+            // Check if meeting ended
             if (await this.meetingHandler.isMeetingEnded()) {
                 console.log('Detected that the meeting is ended');
                 this.kicked = true; //store
                 break; //exit loop
             }
 
-            // await this.handleInfoPopup(1000);
-
             // Reset Loop
-            console.log('Waiting 5 seconds.');
-            await setTimeout(5000); //5 second loop
+            console.log('Waiting 10 seconds.');
+            await setTimeout(10000); //10 second loop
         }
 
         //

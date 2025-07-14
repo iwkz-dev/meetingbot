@@ -5,15 +5,13 @@ import { MeetingHandlerInterface } from './MeetingService';
 const muteButton = '#preview-audio-control-button';
 const stopVideoButton = '#preview-video-control-button';
 const joinButton = 'button.zm-btn.preview-join-button';
-const leaveButton = `//button[@aria-label="Leave"]`;
-//const leaveButton = 'button[aria-label="Verlassen"]';
+const leaveButton = '.footer__leave-btn-container';
 const acceptCookiesButton = '#onetrust-accept-btn-handler';
 const acceptTermsButton = '#wc_agree1';
 
 export default class HandlerZoom implements MeetingHandlerInterface {
     botSettings: BotConfig;
     page: Page;
-    frame: any;
 
     constructor(settings: BotConfig, page: Page) {
         this.botSettings = settings;
@@ -38,10 +36,10 @@ export default class HandlerZoom implements MeetingHandlerInterface {
         const iframe = await this.page.waitForSelector(
             '.pwa-webclient__iframe'
         );
-        this.frame = await iframe?.contentFrame();
+        const frame = await iframe?.contentFrame();
         console.log('Opened iFrame');
 
-        if (this.frame) {
+        if (frame) {
             // Wait for things to load (can be removed later in place of a check for a button to be clickable)
             await this.page.waitForTimeout(this.randomDelay(1500));
 
@@ -50,10 +48,10 @@ export default class HandlerZoom implements MeetingHandlerInterface {
 
             // Checking if Cookies modal popped up
             try {
-                await this.frame.waitForSelector(acceptCookiesButton, {
+                await frame.waitForSelector(acceptCookiesButton, {
                     timeout: 700,
                 });
-                this.frame.click(acceptCookiesButton);
+                frame.click(acceptCookiesButton);
                 console.log('Cookies Accepted');
             } catch (error) {
                 // It's OK
@@ -65,10 +63,10 @@ export default class HandlerZoom implements MeetingHandlerInterface {
 
             // Checking if TOS modal popped up
             try {
-                await this.frame.waitForSelector(acceptTermsButton, {
+                await frame.waitForSelector(acceptTermsButton, {
                     timeout: 700,
                 });
-                await this.frame.click(acceptTermsButton);
+                await frame.click(acceptTermsButton);
                 console.log('TOS Accepted');
             } catch (error) {
                 // It's OK
@@ -79,31 +77,31 @@ export default class HandlerZoom implements MeetingHandlerInterface {
             // The timeout is big to make sure buttons are initialized. With smaller one click doesn't work randomly and bot joins the meeting with sound and/or video
             await this.page.waitForTimeout(this.randomDelay(6000));
 
-            await this.frame.waitForSelector(muteButton);
-            await this.frame.click(muteButton);
+            await frame.waitForSelector(muteButton);
+            await frame.click(muteButton);
             console.log('Muted');
 
-            await this.frame.waitForSelector(stopVideoButton);
-            await this.frame.click(stopVideoButton);
+            await frame.waitForSelector(stopVideoButton);
+            await frame.click(stopVideoButton);
             console.log('Stopped video');
 
             // Waits for the input field and types the name from the config
-            await this.frame.waitForSelector('#input-for-name');
-            await this.frame.type(
+            await frame.waitForSelector('#input-for-name');
+            await frame.type(
                 '#input-for-name',
                 this.botSettings?.botDisplayName ?? 'Meeting Bot'
             );
             console.log('Typed name');
 
             // Clicks the join button
-            await this.frame.waitForSelector(joinButton);
-            await this.frame.click(joinButton);
+            await frame.waitForSelector(joinButton);
+            await frame.click(joinButton);
             console.log('Joined the meeting');
 
             // wait for the leave button to appear (meaning we've joined the meeting)
             await this.page.waitForTimeout(this.randomDelay(1400));
             try {
-                await this.frame.waitForSelector(leaveButton, {
+                await frame.waitForSelector(leaveButton, {
                     timeout: this.botSettings.automaticLeave.waitingRoomTimeout,
                 });
             } catch (error) {
@@ -117,50 +115,34 @@ export default class HandlerZoom implements MeetingHandlerInterface {
             );
         } else {
             console.error('frame is not created!');
-            console.error(this.frame);
+            console.error(frame);
             console.error(iframe);
         }
     }
 
     async isMeetingEnded(): Promise<boolean> {
-        if (this.frame) {
+        const iframe = await this.page.waitForSelector(
+            '.pwa-webclient__iframe'
+        );
+        const frame = await iframe?.contentFrame();
+        if (frame) {
             console.log('Check is meeting ended...');
 
             try {
                 // Checking if Leave buttons is present which indicates the meeting is still running
-                const leaveButtonEl = await this.page
-                    .locator(leaveButton)
-                    .isHidden({ timeout: 500 })
-                    .catch(() => true);
+                await frame?.waitForSelector(leaveButton, { timeout: 1000 });
 
-                console.log(`check leaveButtonEl visibility ${leaveButtonEl}`);
-                if (!leaveButtonEl) {
-                    console.log(
-                        'LeaveButton not exist, indicate that meeting ended'
-                    );
-
-                    return true;
-                }
-
-                // Wait for the "Ok" button to appear which indicates the meeting is over
-                const okButton = await this.frame?.waitForSelector(
-                    'button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue',
-                    { timeout: 10000 }
-                );
-                console.log(`check okButton visibility ${okButton}`);
-                if (okButton) {
-                    console.log('Meeting ended');
-
-                    await okButton.click();
-
-                    return true;
-                }
+                console.log('leave button is exist, meeting still on going!');
             } catch (error) {
+                console.log('leave button not found');
                 console.error(error);
+
+                return true;
             }
         } else {
             console.error('frame is not created!');
-            console.error(this.frame);
+            console.error(frame);
+
             return true;
         }
 
