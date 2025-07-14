@@ -1,8 +1,8 @@
 export type MeetingInfo = {
-    meetingId?: string;
-    meetingPassword?: string;
-    meetingUrl?: string;
-    platform?: 'zoom' | 'google';
+    meetingUrl: string;
+    platform: MeetingPlatform;
+    screenWidth: number;
+    screenHeight: number;
 };
 
 export type AutomaticLeave = {
@@ -24,4 +24,9 @@ export type BotConfig = {
 export enum MeetingType {
     SEMINAR = 'SEMINAR',
     RAPAT = 'RAPAT',
+}
+
+export enum MeetingPlatform {
+    ZOOM = 'ZOOM',
+    MEET = 'MEET',
 }

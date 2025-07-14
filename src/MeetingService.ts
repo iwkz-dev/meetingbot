@@ -4,11 +4,13 @@ import { saveVideo, PageVideoCapture } from 'playwright-video';
 import { CaptureOptions } from 'playwright-video/build/PageVideoCapture';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { setTimeout } from 'timers/promises';
-import { BotConfig } from './types';
+import { BotConfig, MeetingPlatform } from './types';
 import * as fs from 'fs';
 import path from 'path';
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import { uploadFileToGDrive } from './GDriveUploader';
+import HandlerGMeet from './HandlerGMeet';
+import HandlerZoom from './HandlerZoom';
 
 // Use Stealth Plugin to avoid detection
 const stealthPlugin = StealthPlugin();
@@ -19,31 +21,6 @@ chromium.use(stealthPlugin);
 // User Agent Constant -- set Feb 2025
 const userAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
-
-// Constant Selectors
-const enterNameField = 'input[type="text"][aria-label="Your name"]';
-const askToJoinButton = '//button[.//span[text()="Ask to join"]]';
-const joinNowButton = '//button[.//span[text()="Join now"]]';
-const gotKickedDetector = '//button[.//span[text()="Return to home screen"]]';
-const leaveButton = `//button[@aria-label="Leave call"]`;
-const peopleButton = `//button[@aria-label="People"]`;
-const onePersonRemainingField =
-    '//span[.//div[text()="Contributors"]]//div[text()="1"]';
-const muteButton = `[aria-label*="Turn off microphone"]`; // *= -> conatins
-const cameraOffButton = `[aria-label*="Turn off camera"]`;
-
-const infoPopupClick = `//button[.//span[text()="Got it"]]`;
-
-// TODO: pass this in meeting info
-const SCREEN_WIDTH = 1920;
-const SCREEN_HEIGHT = 1080;
-
-/**
- * @param amount Milliseconds
- * @returns Random Number within 10% of the amount given, mean at amount
- */
-const randomDelay = (amount: number) =>
-    (2 * Math.random() - 1) * (amount / 10) + amount;
 
 /**
  * Ensure Typescript doesn't complain about the global exposed
@@ -59,6 +36,16 @@ declare global {
 
         recorder: MediaRecorder | undefined;
     }
+}
+
+export interface MeetingHandlerInterface {
+    readonly botSettings: BotConfig;
+    readonly page: Page;
+
+    isMeetingEnded(): Promise<boolean>;
+    joinMeeting(): Promise<void>;
+    updatePage: (page: Page) => void;
+    randomDelay: (amount: number) => number;
 }
 
 /**
@@ -85,6 +72,8 @@ export class MeetingBot {
 
     private ffmpegProcess: ChildProcessWithoutNullStreams | null;
 
+    private meetingHandler: MeetingHandlerInterface;
+
     constructor(botSettings: BotConfig) {
         console.log('Prepare MeetingBot');
         this.recordingVideoPath = path.resolve(__dirname, 'recording.mp4');
@@ -110,13 +99,22 @@ export class MeetingBot {
         this.botSettings = botSettings;
 
         this.ffmpegProcess = null;
+
+        this.meetingHandler = this.getMeetingHandler();
+    }
+
+    getMeetingHandler(): MeetingHandlerInterface {
+        return this.botSettings.meetingInfo.platform === MeetingPlatform.ZOOM
+            ? new HandlerZoom(this.botSettings, this.page)
+            : new HandlerGMeet(this.botSettings, this.page);
     }
 
     /**
      * Run the bot to join the meeting and perform the meeting actions.
      */
     async run(): Promise<void> {
-        await this.joinMeeting();
+        await this.launchBrowser();
+        await this.meetingHandler.joinMeeting();
         await this.meetingActions();
     }
 
@@ -168,7 +166,10 @@ export class MeetingBot {
         }
 
         // Unpack Dimensions
-        const vp = { width: SCREEN_WIDTH, height: SCREEN_HEIGHT };
+        const vp = {
+            width: this.botSettings.meetingInfo.screenWidth,
+            height: this.botSettings.meetingInfo.screenHeight,
+        };
         // Create Browser Context
         const context = await this.browser.newContext({
             permissions: ['camera', 'microphone'],
@@ -178,129 +179,10 @@ export class MeetingBot {
 
         // Create Page, Go to
         this.page = await context.newPage();
-    }
 
-    /**
-     * Calls Launch Browser, then navigates to join the meeting.
-     * @returns 0 on success, or throws an error if it fails to join the meeting.
-     */
-    async joinMeeting() {
-        // Launch
-        await this.launchBrowser();
+        this.meetingHandler.updatePage(this.page);
 
-        //
-        await this.page.waitForTimeout(randomDelay(1000));
-
-        // Inject anti-detection code using addInitScript
-        await this.page.addInitScript(() => {
-            // Disable navigator.webdriver to avoid detection
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined,
-            });
-
-            // Override navigator.plugins to simulate real plugins
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [
-                    { name: 'Chrome PDF Plugin' },
-                    { name: 'Chrome PDF Viewer' },
-                ],
-            });
-
-            // Override navigator.languages to simulate real languages
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['en-US', 'en'],
-            });
-
-            // Override other properties
-            Object.defineProperty(navigator, 'hardwareConcurrency', {
-                get: () => 4,
-            }); // Fake number of CPU cores
-            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 }); // Fake memory size
-            Object.defineProperty(window, 'innerWidth', {
-                get: () => SCREEN_WIDTH,
-            }); // Fake screen resolution
-            Object.defineProperty(window, 'innerHeight', {
-                get: () => SCREEN_HEIGHT,
-            });
-            Object.defineProperty(window, 'outerWidth', {
-                get: () => SCREEN_WIDTH,
-            });
-            Object.defineProperty(window, 'outerHeight', {
-                get: () => SCREEN_HEIGHT,
-            });
-        });
-
-        //Define Bot Name
-        const name = this.botSettings.botDisplayName || 'MeetingBot';
-
-        // Go to the meeting URL (Simulate Movement)
-        await this.page.mouse.move(10, 672);
-        await this.page.mouse.move(102, 872);
-        await this.page.mouse.move(114, 1472);
-        await this.page.waitForTimeout(300);
-        await this.page.mouse.move(114, 100);
-        await this.page.mouse.click(100, 100);
-
-        //Go
-        await this.page.goto(this.meetingURL, { waitUntil: 'networkidle' });
-        await this.page.bringToFront(); //ensure active
-
-        console.log('Waiting for the input field to be visible...');
-        await this.page.waitForSelector(enterNameField, { timeout: 15000 }); // If it can't find the enter name field in 15 seconds then something went wrong.
-
-        console.log('Found it. Waiting for 1 second...');
-        await this.page.waitForTimeout(randomDelay(1000));
-
-        console.log('Filling the input field with the name...');
-        await this.page.fill(enterNameField, name);
-
-        console.log('Turning Off Camera and Microphone ...');
-        try {
-            await this.page.waitForTimeout(randomDelay(500));
-            await this.page.click(muteButton, { timeout: 200 });
-            await this.page.waitForTimeout(200);
-        } catch (e) {
-            console.log('Could not turn off Microphone, probably already off.');
-        }
-        try {
-            await this.page.click(cameraOffButton, { timeout: 200 });
-            await this.page.waitForTimeout(200);
-        } catch (e) {
-            console.log('Could not turn off Camera -- probably already off.');
-        }
-
-        console.log(
-            'Waiting for either the "Join now" or "Ask to join" button to appear...'
-        );
-        const entryButton = await Promise.race([
-            this.page
-                .waitForSelector(joinNowButton, { timeout: 60000 })
-                .then(() => joinNowButton),
-            this.page
-                .waitForSelector(askToJoinButton, { timeout: 60000 })
-                .then(() => askToJoinButton),
-        ]);
-
-        await this.page.click(entryButton);
-
-        //Should Exit after 1 Minute
-        console.log('Awaiting Entry ....');
-        const timeout = this.botSettings.automaticLeave.waitingRoomTimeout; // in milliseconds
-
-        // wait for the leave button to appear (meaning we've joined the meeting)
-        try {
-            await this.page.waitForSelector(leaveButton, {
-                timeout: timeout,
-            });
-        } catch (e) {
-            console.error('timeout error');
-        }
-
-        //Done. Log.
-        console.log('Joined Call.');
-
-        //Done.
-        return 0;
+        console.log('Launch Browser...');
     }
 
     /**
@@ -337,6 +219,8 @@ export class MeetingBot {
         const audioSource = 'default';
         const audioBitrate = '128k';
         const fps = '25';
+        const screenWidth = this.botSettings.meetingInfo.screenWidth;
+        const screenHeight = this.botSettings.meetingInfo.screenHeight;
 
         return [
             '-v',
@@ -344,7 +228,7 @@ export class MeetingBot {
             '-thread_queue_size',
             '512', // Increase thread queue size to handle input buffering
             '-video_size',
-            `${SCREEN_WIDTH}x${SCREEN_HEIGHT}`, //full screen resolution
+            `${screenWidth}x${screenHeight}`, //full screen resolution
             '-framerate',
             fps, // Lower frame rate to reduce CPU usage
             '-f',
@@ -532,58 +416,17 @@ export class MeetingBot {
     }
 
     /**
-     * Check if we got kicked from the meeting.
-     *
-     */
-    async checkKicked() {
-        // Check if "Return to Home Page" button exists (Kick Condition 1)
-        if (
-            (await this.page
-                .locator(gotKickedDetector)
-                .count()
-                .catch(() => 0)) > 0
-        ) {
-            return true;
-        }
-
-        // console.log('Checking for hidden leave button ...')
-        // Hidden Leave Button (Kick Condition 2)
-        if (
-            await this.page
-                .locator(leaveButton)
-                .isHidden({ timeout: 500 })
-                .catch(() => true)
-        ) {
-            return true;
-        }
-
-        // console.log('Checking for removed from meeting text ...')
-        // Removed from Meeting Text (Kick Condition 3)
-        if (
-            await this.page
-                .locator('text="You\'ve been removed from the meeting"')
-                .isVisible({ timeout: 500 })
-                .catch(() => false)
-        ) {
-            return true;
-        }
-
-        // Did not get kicked if reached here.
-        return false;
-    }
-
-    /**
      * Check if a pop-up appeared. If so, close it.
      */
-    async handleInfoPopup(timeout = 5000) {
-        try {
-            await this.page.waitForSelector(infoPopupClick, { timeout });
-        } catch (e) {
-            return;
-        }
-        console.log('Clicking the popup...');
-        await this.page.click(infoPopupClick);
-    }
+    // async handleInfoPopup(timeout = 5000) {
+    //     try {
+    //         await this.page.waitForSelector(infoPopupClick, { timeout });
+    //     } catch (e) {
+    //         return;
+    //     }
+    //     console.log('Clicking the popup...');
+    //     await this.page.click(infoPopupClick);
+    // }
 
     /**
      *
@@ -606,24 +449,7 @@ export class MeetingBot {
         console.log(
             "Waiting for the 'Others might see you differently' popup..."
         );
-        await this.handleInfoPopup();
-
-        // Meeting Join Actions
-        try {
-            console.log('Finding People Button...');
-            await this.page.waitForSelector(peopleButton, { timeout: 5000 });
-            console.log('Clicking People Button...');
-            await this.page.click(peopleButton, { timeout: 500 });
-
-            // Wait for the people panel to be visible
-            await this.page.waitForSelector('[aria-label="Participants"]', {
-                state: 'visible',
-            });
-        } catch {
-            console.log('Could not click People button. Continuing anyways.');
-        }
-
-        // Set up participant monitoring
+        // await this.handleInfoPopup();
 
         // Monitor for participants joining
         await this.page.exposeFunction(
@@ -749,13 +575,13 @@ export class MeetingBot {
 
             // Got kicked -- no longer in the meeting
             // Check each of the potentials conditions
-            if (await this.checkKicked()) {
-                console.log('Detected that we were kicked from the meeting.');
+            if (await this.meetingHandler.isMeetingEnded()) {
+                console.log('Detected that the meeting is ended');
                 this.kicked = true; //store
                 break; //exit loop
             }
 
-            await this.handleInfoPopup(1000);
+            // await this.handleInfoPopup(1000);
 
             // Reset Loop
             console.log('Waiting 5 seconds.');
@@ -799,16 +625,6 @@ export class MeetingBot {
      * @returns {Promise<number>} - Returns 0 if the bot successfully leaves the meeting, or 1 if it fails to leave the meeting.
      */
     async leaveMeeting() {
-        console.log('Trying to leave the call ...');
-        try {
-            await this.page.click(leaveButton, { timeout: 1000 }); //Short Attempt
-            console.log('Left Call.');
-        } catch (e) {
-            console.log(
-                "Attempted to Leave Call - couldn't (probably aleready left)."
-            );
-        }
-
         console.log('Ending Life ...');
         await this.endLife();
 

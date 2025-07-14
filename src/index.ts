@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
-import { createBot } from './BotService';
+import { createBot } from './MeetingController';
 import { MeetingType } from './types';
 import path from 'path';
 

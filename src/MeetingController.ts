@@ -1,9 +1,11 @@
-import { MeetingBot } from './MeetingBot';
-import { MeetingType } from './types';
+import { MeetingBot } from './MeetingService';
+import { MeetingPlatform, MeetingType } from './types';
 import { uploadFileToGDrive } from './GDriveUploader';
 
 const BOT_NAME = process.env.BOT_NAME || 'IWKZ Bot';
 const DEFAULT_TIMEOUT = 9000; //9 second
+const SCREEN_WIDTH = 1920;
+const SCREEN_HEIGHT = 1080;
 
 export const createBot = async (
     meetingUrl: string,
@@ -11,10 +13,15 @@ export const createBot = async (
     meetingType: MeetingType
 ) => {
     let meetingRecord = {};
+    const { url, platform } = evaluateMeetingUrl(meetingUrl);
+
     const bot = await new MeetingBot({
         id: 1,
         meetingInfo: {
-            meetingUrl: meetingUrl,
+            meetingUrl: url,
+            platform,
+            screenWidth: SCREEN_WIDTH,
+            screenHeight: SCREEN_HEIGHT,
         },
         meetingTitle: meetingTitle,
         botDisplayName: BOT_NAME,
@@ -84,3 +91,32 @@ const uploadRecordingToGDrive = async (
 
     return meetingRecord;
 };
+
+const evaluateMeetingUrl = (meetingUrl: string) => {
+    if (meetingUrl.includes('meet.google')) {
+        return {
+            platform: MeetingPlatform.MEET,
+            url: meetingUrl,
+        };
+    }
+
+    // zoom meeting url
+    const parsed = parseZoomMeetingLink(meetingUrl);
+
+    return {
+        url: `https://app.zoom.us/wc/${parsed.meetingId}/join?fromPWA=1&pwd=${parsed.meetingPassword}`,
+        platform: MeetingPlatform.ZOOM,
+    };
+};
+
+function parseZoomMeetingLink(url: string) {
+    const urlObj = new URL(url);
+    const pathSegments = urlObj.pathname.split('/');
+    const meetingId = pathSegments[pathSegments.length - 1];
+    const meetingPassword = urlObj.searchParams.get('pwd') || '';
+
+    return {
+        meetingId,
+        meetingPassword,
+    };
+}
