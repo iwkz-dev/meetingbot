@@ -333,7 +333,7 @@ export class MeetingBot {
     async meetingActions() {
         // Start Recording, Yes by default
         console.log('Starting Recording');
-        //this.startRecording();
+        this.startRecording();
 
         // Loop -- check for end meeting conditions every second
         console.log('Waiting until a leave condition is fulfilled..');
