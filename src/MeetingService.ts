@@ -62,10 +62,8 @@ export class MeetingBot {
     recordingMp3Path: string;
     botSettings: BotConfig;
 
-    private recordBuffer: Buffer[] = [];
     private startedRecording: boolean = false;
 
-    private timeAloneStarted: number = Infinity;
     participantCount: number = 0;
 
     private ffmpegProcess: ChildProcessWithoutNullStreams | null;
@@ -99,12 +97,6 @@ export class MeetingBot {
         this.ffmpegProcess = null;
 
         this.meetingHandler = this.getMeetingHandler();
-    }
-
-    getMeetingHandler(): MeetingHandlerInterface {
-        return this.botSettings.meetingInfo.platform === MeetingPlatform.ZOOM
-            ? new HandlerZoom(this.botSettings, this.page)
-            : new HandlerGMeet(this.botSettings, this.page);
     }
 
     /**
@@ -146,6 +138,12 @@ export class MeetingBot {
         return this.recordingMp3Path;
     }
 
+    getMeetingHandler(): MeetingHandlerInterface {
+        return this.botSettings.meetingInfo.platform === MeetingPlatform.ZOOM
+            ? new HandlerZoom(this.botSettings, this.page)
+            : new HandlerGMeet(this.botSettings, this.page);
+    }
+
     /**
      * Launches the browser and opens a blank page.
      */
@@ -181,95 +179,6 @@ export class MeetingBot {
         this.meetingHandler.updatePage(this.page);
 
         console.log('Launch Browser...');
-    }
-
-    /**
-     *
-     */
-    getFFmpegParams() {
-        // For Testing (pnpm test) -- no docker x11 server running.
-        if (!fs.existsSync('/tmp/.X11-unix')) {
-            console.log('Using test ffmpeg params');
-            return [
-                '-y',
-                '-f',
-                'lavfi',
-                '-i',
-                'color=c=blue:s=1280x720:r=30',
-                '-video_size',
-                '1280x720',
-                '-preset',
-                'ultrafast',
-                '-c:a',
-                'aac',
-                '-c:v',
-                'libx264',
-                this.getRecordingVideoPath(),
-            ];
-        }
-
-        // Creait to @martinezpl for these ffmpeg params.
-        console.log('Loading Dockerized FFMPEG Params ...');
-
-        const videoInputFormat = 'x11grab';
-        const audioInputFormat = 'pulse';
-        const videoSource = ':99.0';
-        const audioSource = 'default';
-        const audioBitrate = '128k';
-        const fps = '25';
-        const screenWidth = this.botSettings.meetingInfo.screenWidth;
-        const screenHeight = this.botSettings.meetingInfo.screenHeight;
-
-        return [
-            '-v',
-            'verbose', // Verbose logging for debugging
-            '-thread_queue_size',
-            '512', // Increase thread queue size to handle input buffering
-            '-video_size',
-            `${screenWidth}x${screenHeight}`, //full screen resolution
-            '-framerate',
-            fps, // Lower frame rate to reduce CPU usage
-            '-f',
-            videoInputFormat,
-            '-i',
-            videoSource,
-            '-thread_queue_size',
-            '512',
-            '-f',
-            audioInputFormat,
-            '-i',
-            audioSource,
-            '-c:v',
-            'libx264', // H.264 codec for browser compatibility
-            '-pix_fmt',
-            'yuv420p', // Ensures compatibility with most browsers
-            '-preset',
-            'veryfast', // Use a faster preset to reduce CPU usage
-            '-crf',
-            '28', // Increase CRF for reduced CPU usage
-            '-c:a',
-            'aac', // AAC codec for audio compatibility
-            '-b:a',
-            audioBitrate, // Lower audio bitrate for reduced CPU usage
-            '-vsync',
-            '2', // Synchronize video and audio
-            '-vf',
-            'scale=1280:720', // Ensure the video is scaled to 720p
-            '-y',
-            this.getRecordingVideoPath(), // Output file path
-        ];
-    }
-
-    getFFmpegMP3ConverterParams() {
-        return [
-            '-i',
-            this.getRecordingVideoPath(),
-            '-q:a',
-            '0',
-            '-map',
-            'a',
-            this.recordingMp3Path,
-        ];
     }
 
     /**
@@ -440,51 +349,122 @@ export class MeetingBot {
             }
 
             // Reset Loop
-            console.log('Waiting 10 seconds.');
-            await setTimeout(10000); //10 second loop
+            console.log('Waiting 20 seconds.');
+            await setTimeout(20000); //10 second loop
         }
 
         //
         // Exit
-        console.log('Starting End Life Actions ...');
-
-        try {
-            await this.leaveMeeting();
-            return 0;
-        } catch (e) {
-            await this.endLife();
-            return 1;
-        }
+        console.log('End Meeting Actions ...');
+        await this.endMeeting();
     }
 
     /**
-     * Clean up the meeting
+     * Clean up the meeting & Stop recording
      */
-    async endLife() {
+    async endMeeting() {
         // Ensure Recording is done
-        console.log('Stopping Recording ...');
-        await this.stopRecording();
-        await this.generateMp3Recording();
-        console.log('Done.');
+        try {
+            console.log('Stopping Recording ...');
+            await this.stopRecording();
+            await this.generateMp3Recording();
+            console.log('Done.');
 
-        // Close my browser
-        if (this.browser) {
-            await this.browser.close();
-            console.log('Closed Browser.');
+            // Close my browser
+            if (this.browser) {
+                await this.browser.close();
+                console.log('Closed Browser.');
+            }
+        } catch (error) {
+            console.error(error);
         }
     }
-
     /**
      *
-     * Attempts to leave the meeting -- then cleans up.
-     *
-     * @returns {Promise<number>} - Returns 0 if the bot successfully leaves the meeting, or 1 if it fails to leave the meeting.
      */
-    async leaveMeeting() {
-        console.log('Ending Life ...');
-        await this.endLife();
+    getFFmpegParams() {
+        // For Testing (pnpm test) -- no docker x11 server running.
+        if (!fs.existsSync('/tmp/.X11-unix')) {
+            console.log('Using test ffmpeg params');
+            return [
+                '-y',
+                '-f',
+                'lavfi',
+                '-i',
+                'color=c=blue:s=1280x720:r=30',
+                '-video_size',
+                '1280x720',
+                '-preset',
+                'ultrafast',
+                '-c:a',
+                'aac',
+                '-c:v',
+                'libx264',
+                this.getRecordingVideoPath(),
+            ];
+        }
 
-        console.log('Uploading mp4 recording to gdrive...');
-        return 0;
+        // Creait to @martinezpl for these ffmpeg params.
+        console.log('Loading Dockerized FFMPEG Params ...');
+
+        const videoInputFormat = 'x11grab';
+        const audioInputFormat = 'pulse';
+        const videoSource = ':99.0';
+        const audioSource = 'default';
+        const audioBitrate = '128k';
+        const fps = '25';
+        const screenWidth = this.botSettings.meetingInfo.screenWidth;
+        const screenHeight = this.botSettings.meetingInfo.screenHeight;
+
+        return [
+            '-v',
+            'verbose', // Verbose logging for debugging
+            '-thread_queue_size',
+            '512', // Increase thread queue size to handle input buffering
+            '-video_size',
+            `${screenWidth}x${screenHeight}`, //full screen resolution
+            '-framerate',
+            fps, // Lower frame rate to reduce CPU usage
+            '-f',
+            videoInputFormat,
+            '-i',
+            videoSource,
+            '-thread_queue_size',
+            '512',
+            '-f',
+            audioInputFormat,
+            '-i',
+            audioSource,
+            '-c:v',
+            'libx264', // H.264 codec for browser compatibility
+            '-pix_fmt',
+            'yuv420p', // Ensures compatibility with most browsers
+            '-preset',
+            'veryfast', // Use a faster preset to reduce CPU usage
+            '-crf',
+            '28', // Increase CRF for reduced CPU usage
+            '-c:a',
+            'aac', // AAC codec for audio compatibility
+            '-b:a',
+            audioBitrate, // Lower audio bitrate for reduced CPU usage
+            '-vsync',
+            '2', // Synchronize video and audio
+            '-vf',
+            'scale=1280:720', // Ensure the video is scaled to 720p
+            '-y',
+            this.getRecordingVideoPath(), // Output file path
+        ];
+    }
+
+    getFFmpegMP3ConverterParams() {
+        return [
+            '-i',
+            this.getRecordingVideoPath(),
+            '-q:a',
+            '0',
+            '-map',
+            'a',
+            this.recordingMp3Path,
+        ];
     }
 }

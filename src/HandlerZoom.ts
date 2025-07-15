@@ -130,18 +130,6 @@ export default class HandlerZoom implements MeetingHandlerInterface {
         if (frame) {
             console.log('Check is meeting ended...');
 
-            // Checking if Leave buttons is present which indicates the meeting is still running
-            try {
-                await frame?.waitForSelector(leaveButton, { timeout: 1000 });
-
-                console.log('leave button is exist, meeting still on going!');
-            } catch (error) {
-                console.log('leave button not found');
-                console.error(error);
-
-                return true;
-            }
-
             //OK Button Exist
             try {
                 const okBtnElement = await frame?.waitForSelector(okButton, {
@@ -152,9 +140,22 @@ export default class HandlerZoom implements MeetingHandlerInterface {
                     await okBtnElement.click();
 
                     console.log('OK button exist and click!');
+                    await this.page.waitForTimeout(this.randomDelay(1500));
                 }
             } catch (error) {
                 console.error(error);
+            }
+
+            // Checking if Leave buttons is present which indicates the meeting is still running
+            try {
+                await frame?.waitForSelector(leaveButton, { timeout: 1000 });
+
+                console.log('leave button is exist, meeting still on going!');
+            } catch (error) {
+                console.log('leave button not found');
+                console.error(error);
+
+                return true;
             }
         } else {
             console.error('frame is not created!');

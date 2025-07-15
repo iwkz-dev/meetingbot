@@ -36,9 +36,10 @@ export const createBot = async (
 
     try {
         await bot.run().catch(async (error) => {
-            bot.screenshot();
+            console.error(error);
+            //bot.screenshot();
 
-            await bot.endLife();
+            await bot.endMeeting();
         });
 
         // Upload recording to GDrive
