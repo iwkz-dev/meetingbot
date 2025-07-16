@@ -3,7 +3,8 @@
     "version": "1.0.0",
     "description": "IWKZ Bot to record online meeting",
     "scripts": {
-        "start": "tsx src/index.ts"
+        "start": "tsx src/index.ts",
+        "preinstall": "pnpm dlx playwright@1.52 install"
     },
     "dependencies": {
         "@ffmpeg-installer/ffmpeg": "^1.1.0",
@@ -16,6 +17,7 @@
         "fs-extra": "^11.2.0",
         "googleapis": "^152.0.0",
         "playwright": "1.52.0",
+        "playwright-core": "1.52.0",
         "playwright-extra": "^4.3.6",
         "playwright-extra-plugin-stealth": "^0.0.1",
         "playwright-video": "^2.4.0",
@@ -26,6 +28,7 @@
         "superjson": "^2.2.1"
     },
     "devDependencies": {
+        "@playwright/test": "1.52.0",
         "@types/dotenv": "^6.1.1",
         "@types/express": "^5.0.3",
         "tsx": "^4.19.2",
