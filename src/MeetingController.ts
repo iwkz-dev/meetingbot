@@ -85,7 +85,7 @@ const uploadRecordingToGDrive = async (
         console.log('Start uploading MP3 to gdrive...');
         await uploadFileToGDrive(
             meetingTitle,
-            bot.getRecordingMp3Path(),
+            bot.getRecordingAudioPath(),
             gDriveTmpFolderId
         );
     }

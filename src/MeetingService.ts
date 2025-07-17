@@ -59,7 +59,7 @@ export class MeetingBot {
     recorder: PageVideoCapture | undefined;
     kicked: boolean = false;
     recordingVideoPath: string;
-    recordingMp3Path: string;
+    recordingAudioPath: string;
     botSettings: BotConfig;
 
     private startedRecording: boolean = false;
@@ -73,7 +73,7 @@ export class MeetingBot {
     constructor(botSettings: BotConfig) {
         console.log('Prepare MeetingBot');
         this.recordingVideoPath = path.resolve(__dirname, 'recording.mp4');
-        this.recordingMp3Path = path.resolve(__dirname, 'recording.mp3');
+        this.recordingAudioPath = path.resolve(__dirname, 'recording.ogg');
 
         this.browserArgs = [
             '--incognito',
@@ -127,15 +127,15 @@ export class MeetingBot {
      * Gets a consistant audio only recording path
      * @returns {string} - Returns the path to the recording file.
      */
-    getRecordingMp3Path(): string {
+    getRecordingAudioPath(): string {
         // Ensure the directory exists
-        const dir = path.dirname(this.recordingMp3Path);
+        const dir = path.dirname(this.recordingAudioPath);
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
 
         // Give Back the path
-        return this.recordingMp3Path;
+        return this.recordingAudioPath;
     }
 
     getMeetingHandler(): MeetingHandlerInterface {
@@ -292,13 +292,13 @@ export class MeetingBot {
         }
     }
 
-    async generateMp3Recording() {
-        console.log('Attempting to generae mp3 file ...');
+    async generateAudioRecording() {
+        console.log('Attempting to generate audio file ...');
 
         try {
             this.ffmpegProcess = spawn(
                 'ffmpeg',
-                this.getFFmpegMP3ConverterParams()
+                this.getFFmpegAudioConverterParams()
             );
 
             // Report when the process exits
@@ -367,7 +367,7 @@ export class MeetingBot {
         try {
             console.log('Stopping Recording ...');
             await this.stopRecording();
-            await this.generateMp3Recording();
+            await this.generateAudioRecording();
             console.log('Done.');
 
             // Close my browser
@@ -456,15 +456,22 @@ export class MeetingBot {
         ];
     }
 
-    getFFmpegMP3ConverterParams() {
+    getFFmpegAudioConverterParams() {
         return [
             '-i',
             this.getRecordingVideoPath(),
-            '-q:a',
-            '0',
-            '-map',
-            'a',
-            this.recordingMp3Path,
+            '-vn',
+            '-map_metadata',
+            '-1',
+            '-ac',
+            '1',
+            '-c:a',
+            'libopus',
+            '-b:a',
+            '12k',
+            '-application',
+            'voip',
+            this.recordingAudioPath,
         ];
     }
 }
