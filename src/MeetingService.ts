@@ -301,11 +301,17 @@ export class MeetingBot {
                 this.getFFmpegAudioConverterParams()
             );
 
+            //TODO: FIX THIS!
             // Report when the process exits
-            await new Promise((res, rej) => {
-                childProcess.on('exit', res);
-                childProcess.on('close', res);
+            // await new Promise((res, rej) => {
+            //     childProcess.on('exit', res);
+            //     childProcess.on('close', res);
+            // });
+            childProcess.on('close', (code) => {
+                console.log('close generate audio done, ' + code);
             });
+
+            await setTimeout(300000); //should not use this, remove after promise fixed
         } catch (error) {
             console.error(error);
         }
