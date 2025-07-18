@@ -296,16 +296,15 @@ export class MeetingBot {
         console.log('Attempting to generate audio file ...');
 
         try {
-            this.ffmpegProcess = spawn(
+            const childProcess = spawn(
                 'ffmpeg',
                 this.getFFmpegAudioConverterParams()
             );
 
             // Report when the process exits
-            this.ffmpegProcess.on('exit', (code) => {
-                console.log(`done conver to mp3`);
-                console.log(`ffmpeg exited with code ${code}`);
-                this.ffmpegProcess = null;
+            await new Promise((res, rej) => {
+                childProcess.on('exit', res);
+                childProcess.on('close', res);
             });
         } catch (error) {
             console.error(error);
