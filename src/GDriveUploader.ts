@@ -32,7 +32,7 @@ export async function uploadFileToGDrive(
     };
 
     const media = {
-        mimeType: 'video/webm',
+        mimeType: getMimeType(recordingFilePath),
         body: fs.createReadStream(recordingFilePath),
     };
 
@@ -51,4 +51,18 @@ export async function uploadFileToGDrive(
         id: res.data.id!,
         link: res.data.webViewLink!,
     };
+}
+
+function getMimeType(filePath: string) {
+    const extension = path.extname(filePath).toLowerCase();
+
+    switch (extension) {
+        case '.mp4':
+            return 'video/mp4';
+        case '.ogg':
+        case '.opus':
+            return 'audio/ogg';
+        default:
+            return 'application/octet-stream';
+    }
 }

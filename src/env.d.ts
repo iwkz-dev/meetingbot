@@ -3,7 +3,7 @@ declare namespace NodeJS {
         PORT: string;
         NODE_ENV: 'development' | 'production';
 
-        BOT_NAME: string;
+        CONTROL_PANEL_PASSWORD: string;
         CHROME_PATH: string;
         USE_CHROME_PATH: string;
         FFMPEG_STDERR_ECHO: string;

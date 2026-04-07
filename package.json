@@ -4,6 +4,7 @@
     "description": "IWKZ Bot to record online meeting",
     "scripts": {
         "start": "tsx src/index.ts",
+        "docker:rebuild": "sh ./scripts/docker-rebuild.sh",
         "preinstall": "pnpm dlx playwright@1.52 install"
     },
     "dependencies": {

@@ -7,15 +7,11 @@ const askToJoinButton = '//button[.//span[text()="Ask to join"]]';
 const joinNowButton = '//button[.//span[text()="Join now"]]';
 const gotKickedDetector = '//button[.//span[text()="Return to home screen"]]';
 const leaveButton = `//button[@aria-label="Leave call"]`;
-const peopleButton = `//button[@aria-label="People"]`;
-const onePersonRemainingField =
-    '//span[.//div[text()="Contributors"]]//div[text()="1"]';
+const peopleButton = `//button[contains(@aria-label, "People")]`;
 const muteButton = `[aria-label*="Turn off microphone"]`; // *= -> conatins
 const cameraOffButton = `[aria-label*="Turn off camera"]`;
 
-const infoPopupClick = `//button[.//span[text()="Got it"]]`;
-
-export default class HandlerZoom implements MeetingHandlerInterface {
+export default class HandlerGMeet implements MeetingHandlerInterface {
     botSettings: BotConfig;
     page: Page;
 
@@ -26,6 +22,10 @@ export default class HandlerZoom implements MeetingHandlerInterface {
 
     updatePage(page: Page) {
         this.page = page;
+    }
+
+    async join(): Promise<void> {
+        await this.joinMeeting();
     }
 
     async joinMeeting(): Promise<void> {
@@ -180,7 +180,45 @@ export default class HandlerZoom implements MeetingHandlerInterface {
         return false;
     }
 
+    async getParticipantCount(): Promise<number | null> {
+        try {
+            const peopleLocator = this.page.locator(peopleButton).first();
+            const ariaLabel = await peopleLocator
+                .getAttribute('aria-label', { timeout: 500 })
+                .catch(() => null);
+            const buttonText = await peopleLocator
+                .textContent({ timeout: 500 })
+                .catch(() => null);
+
+            return this.extractCount(ariaLabel ?? buttonText ?? null);
+        } catch (error) {
+            console.error('Failed to read Google Meet participant count', error);
+            return null;
+        }
+    }
+
+    async leaveMeeting(): Promise<void> {
+        try {
+            const leaveLocator = this.page.locator(leaveButton).first();
+            if (await leaveLocator.isVisible({ timeout: 1000 }).catch(() => false)) {
+                await leaveLocator.click();
+                console.log('Left Google Meet.');
+            }
+        } catch (error) {
+            console.error('Failed to leave Google Meet cleanly', error);
+        }
+    }
+
     randomDelay(amount: number) {
         return (2 * Math.random() - 1) * (amount / 10) + amount;
+    }
+
+    private extractCount(value: string | null) {
+        if (!value) {
+            return null;
+        }
+
+        const match = value.match(/(\d+)/);
+        return match ? Number(match[1]) : null;
     }
 }

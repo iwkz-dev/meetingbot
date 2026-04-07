@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y \
 # Set the working directory inside the container
 WORKDIR /app
 
+ENV NODE_ENV=production
+
 #Install pnpm globally
 RUN npm install -g pnpm
 
@@ -76,6 +78,8 @@ RUN chown -R meetingbot:meetingbot ./src
 
 # Expose display port
 ENV DISPLAY=:99
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD node -e "const http=require('http'); const port=process.env.PORT || 3009; http.get({host:'127.0.0.1', port, path:'/health'}, (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));"
 
 # # Run Command
 USER meetingbot

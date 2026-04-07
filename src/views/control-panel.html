@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Meeting Bot Control Panel</title>
+        <style>
+            :root {
+                --bg: #f4f0e8;
+                --panel: #fffaf2;
+                --line: #d8cdbb;
+                --text: #2b251e;
+                --muted: #6b6258;
+                --accent: #0d6c63;
+                --accent-strong: #094d47;
+                --danger: #b7482c;
+                --danger-strong: #913521;
+                --chip: #efe5d4;
+            }
+
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                margin: 0;
+                padding: 24px;
+                background:
+                    radial-gradient(circle at top left, #fff7df 0, transparent 28%),
+                    linear-gradient(160deg, #f4f0e8 0%, #ede2d0 100%);
+                color: var(--text);
+                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            }
+
+            .shell {
+                width: min(1120px, 100%);
+                margin: 0 auto;
+                display: grid;
+                gap: 20px;
+            }
+
+            .hero,
+            .panel {
+                border: 1px solid var(--line);
+                border-radius: 22px;
+                background: rgba(255, 250, 242, 0.95);
+                box-shadow: 0 24px 60px rgba(43, 37, 30, 0.08);
+            }
+
+            .hero {
+                padding: 24px;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 16px;
+                align-items: center;
+                justify-content: space-between;
+            }
+
+            .hero h1 {
+                margin: 0;
+                font-size: clamp(2rem, 4vw, 3rem);
+            }
+
+            .hero p {
+                margin: 8px 0 0;
+                color: var(--muted);
+                max-width: 680px;
+                line-height: 1.5;
+            }
+
+            .logout-form {
+                margin: 0;
+            }
+
+            .layout {
+                display: grid;
+                grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+                gap: 20px;
+            }
+
+            .panel {
+                padding: 22px;
+            }
+
+            .panel h2 {
+                margin: 0 0 14px;
+                font-size: 1.2rem;
+            }
+
+            .stats {
+                display: grid;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 12px;
+            }
+
+            .stat {
+                padding: 14px;
+                border-radius: 16px;
+                background: var(--chip);
+            }
+
+            .stat span {
+                display: block;
+                color: var(--muted);
+                font-size: 0.88rem;
+            }
+
+            .stat strong {
+                display: block;
+                margin-top: 6px;
+                font-size: 1.2rem;
+            }
+
+            form {
+                display: grid;
+                gap: 14px;
+            }
+
+            label {
+                display: block;
+                margin-bottom: 6px;
+                font-weight: 600;
+            }
+
+            input,
+            select,
+            button,
+            textarea {
+                width: 100%;
+                border-radius: 12px;
+                font: inherit;
+            }
+
+            input,
+            select {
+                padding: 12px 14px;
+                border: 1px solid var(--line);
+                background: white;
+                color: var(--text);
+            }
+
+            button {
+                padding: 12px 16px;
+                border: none;
+                cursor: pointer;
+                color: white;
+                background: var(--accent);
+                font-weight: 600;
+            }
+
+            button:hover {
+                background: var(--accent-strong);
+            }
+
+            button.secondary {
+                background: #8d7d66;
+            }
+
+            button.secondary:hover {
+                background: #6f6252;
+            }
+
+            button.danger {
+                background: var(--danger);
+            }
+
+            button.danger:hover {
+                background: var(--danger-strong);
+            }
+
+            .sessions {
+                display: grid;
+                gap: 14px;
+            }
+
+            .session {
+                padding: 16px;
+                border: 1px solid var(--line);
+                border-radius: 18px;
+                background: white;
+            }
+
+            .session-head {
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                align-items: flex-start;
+                margin-bottom: 10px;
+            }
+
+            .session-head h3 {
+                margin: 0;
+                font-size: 1.05rem;
+            }
+
+            .chip-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin: 8px 0 12px;
+            }
+
+            .chip {
+                padding: 6px 10px;
+                border-radius: 999px;
+                background: var(--chip);
+                color: var(--text);
+                font-size: 0.84rem;
+                font-weight: 600;
+            }
+
+            .meta {
+                display: grid;
+                gap: 10px;
+                color: var(--muted);
+                font-size: 0.94rem;
+                word-break: break-word;
+            }
+
+            .meta strong {
+                color: var(--text);
+            }
+
+            .session-actions {
+                margin-top: 16px;
+                display: flex;
+                gap: 10px;
+                flex-wrap: wrap;
+            }
+
+            .notice {
+                min-height: 24px;
+                color: var(--muted);
+                font-size: 0.95rem;
+            }
+
+            .notice.error {
+                color: var(--danger);
+            }
+
+            .empty {
+                padding: 18px;
+                border-radius: 18px;
+                background: var(--chip);
+                color: var(--muted);
+            }
+
+            @media (max-width: 900px) {
+                .layout {
+                    grid-template-columns: 1fr;
+                }
+
+                .stats {
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                }
+            }
+
+            @media (max-width: 640px) {
+                body {
+                    padding: 16px;
+                }
+
+                .stats {
+                    grid-template-columns: 1fr;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="shell">
+            <section class="hero">
+                <div>
+                    <h1>Meeting Bot Control Panel</h1>
+                    <p>
+                        Start new bot sessions, monitor which meeting page each bot
+                        is currently on, and force a bot to leave with one click.
+                    </p>
+                </div>
+                <form class="logout-form" method="POST" action="/control-panel/logout">
+                    <button class="secondary" type="submit">Log Out</button>
+                </form>
+            </section>
+
+            <section class="panel">
+                <h2>Runtime Overview</h2>
+                <div class="stats" id="stats">
+                    <div class="stat">
+                        <span>Active Sessions</span>
+                        <strong>-</strong>
+                    </div>
+                    <div class="stat">
+                        <span>Last Started</span>
+                        <strong>-</strong>
+                    </div>
+                    <div class="stat">
+                        <span>Last Finished</span>
+                        <strong>-</strong>
+                    </div>
+                    <div class="stat">
+                        <span>Last Error</span>
+                        <strong>-</strong>
+                    </div>
+                </div>
+            </section>
+
+            <div class="layout">
+                <section class="panel">
+                    <h2>Invite Bot</h2>
+                    <form id="invite-form">
+                        <div>
+                            <label for="meetingUrl">Meeting URL</label>
+                            <input
+                                type="text"
+                                id="meetingUrl"
+                                name="meetingUrl"
+                                placeholder="https://..."
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label for="meetingTitle">Meeting Title</label>
+                            <input
+                                type="text"
+                                id="meetingTitle"
+                                name="meetingTitle"
+                                placeholder="Weekly sync"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label for="botDisplayName">Bot Name</label>
+                            <input
+                                type="text"
+                                id="botDisplayName"
+                                name="botDisplayName"
+                                placeholder="IWKZ Bot"
+                                value="IWKZ Bot"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label for="meetingType">Meeting Type</label>
+                            <select id="meetingType" name="meetingType" required>
+                                <option value="seminar">Seminar</option>
+                                <option value="rapat">Rapat</option>
+                            </select>
+                        </div>
+                        <button type="submit">Start Bot</button>
+                    </form>
+                    <p class="notice" id="invite-notice"></p>
+                </section>
+
+                <section class="panel">
+                    <h2>Live Sessions</h2>
+                    <div class="sessions" id="sessions">
+                        <div class="empty">Loading session state...</div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <script>
+            const statsNode = document.getElementById('stats');
+            const sessionsNode = document.getElementById('sessions');
+            const inviteForm = document.getElementById('invite-form');
+            const inviteNotice = document.getElementById('invite-notice');
+
+            let refreshHandle = null;
+
+            function formatTime(value) {
+                if (!value) {
+                    return '-';
+                }
+
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) {
+                    return value;
+                }
+
+                return date.toLocaleString();
+            }
+
+            function escapeHtml(value) {
+                return String(value ?? '')
+                    .replaceAll('&', '&amp;')
+                    .replaceAll('<', '&lt;')
+                    .replaceAll('>', '&gt;')
+                    .replaceAll('"', '&quot;')
+                    .replaceAll("'", '&#39;');
+            }
+
+            async function fetchState() {
+                const response = await fetch('/api/control-panel/state', {
+                    credentials: 'same-origin',
+                });
+
+                if (response.status === 401) {
+                    window.location.href = '/control-panel';
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error('Could not load control panel state');
+                }
+
+                const payload = await response.json();
+                renderStats(payload.stats);
+                renderSessions(payload.sessions);
+            }
+
+            function renderStats(stats) {
+                statsNode.innerHTML = `
+                    <div class="stat">
+                        <span>Active Sessions</span>
+                        <strong>${escapeHtml(stats.activeSessions)}</strong>
+                    </div>
+                    <div class="stat">
+                        <span>Last Started</span>
+                        <strong>${escapeHtml(formatTime(stats.lastStartedAt))}</strong>
+                    </div>
+                    <div class="stat">
+                        <span>Last Finished</span>
+                        <strong>${escapeHtml(formatTime(stats.lastFinishedAt))}</strong>
+                    </div>
+                    <div class="stat">
+                        <span>Last Error</span>
+                        <strong>${escapeHtml(stats.lastError || '-')}</strong>
+                    </div>
+                `;
+            }
+
+            function renderSessions(sessions) {
+                if (!sessions.length) {
+                    sessionsNode.innerHTML = `
+                        <div class="empty">
+                            No active sessions right now. Start a bot to see live meeting info here.
+                        </div>
+                    `;
+                    return;
+                }
+
+                sessionsNode.innerHTML = sessions
+                    .map(
+                        (session) => `
+                            <article class="session">
+                                <div class="session-head">
+                                    <div>
+                                        <h3>${escapeHtml(session.meetingTitle)}</h3>
+                                        <div class="chip-row">
+                                            <span class="chip">#${escapeHtml(session.id)}</span>
+                                            <span class="chip">${escapeHtml(session.botDisplayName)}</span>
+                                            <span class="chip">${escapeHtml(session.platform)}</span>
+                                            <span class="chip">${escapeHtml(session.meetingType)}</span>
+                                            <span class="chip">${escapeHtml(session.status)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="meta">
+                                    <div><strong>Original Meeting:</strong> ${escapeHtml(session.originalMeetingUrl)}</div>
+                                    <div><strong>Join Target:</strong> ${escapeHtml(session.targetMeetingUrl)}</div>
+                                    <div><strong>Current Page:</strong> ${escapeHtml(session.currentPageUrl || '-')}</div>
+                                    <div><strong>Created:</strong> ${escapeHtml(formatTime(session.createdAt))}</div>
+                                    <div><strong>Joined:</strong> ${escapeHtml(formatTime(session.joinedAt))}</div>
+                                    <div><strong>Stop Requested:</strong> ${session.stopRequested ? 'Yes' : 'No'}</div>
+                                    <div><strong>Last Error:</strong> ${escapeHtml(session.lastError || '-')}</div>
+                                </div>
+                                <div class="session-actions">
+                                    <button
+                                        class="danger"
+                                        type="button"
+                                        data-stop-session="${escapeHtml(session.id)}"
+                                        ${session.stopRequested ? 'disabled' : ''}
+                                    >
+                                        ${session.stopRequested ? 'Stopping...' : 'Leave Meeting'}
+                                    </button>
+                                </div>
+                            </article>
+                        `
+                    )
+                    .join('');
+            }
+
+            async function refreshState() {
+                try {
+                    await fetchState();
+                } catch (error) {
+                    sessionsNode.innerHTML = `
+                        <div class="empty">Failed to load session state: ${escapeHtml(error.message)}</div>
+                    `;
+                }
+            }
+
+            inviteForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                inviteNotice.className = 'notice';
+                inviteNotice.textContent = 'Starting bot...';
+
+                const formData = new FormData(inviteForm);
+                const payload = Object.fromEntries(formData.entries());
+
+                const response = await fetch('/api/control-panel/invite', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload),
+                });
+
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    inviteNotice.className = 'notice error';
+                    inviteNotice.textContent =
+                        result.message || 'Failed to start bot.';
+                    return;
+                }
+
+                inviteNotice.className = 'notice';
+                inviteNotice.textContent = 'Bot join request accepted.';
+                inviteForm.reset();
+                await refreshState();
+            });
+
+            sessionsNode.addEventListener('click', async (event) => {
+                const button = event.target.closest('[data-stop-session]');
+                if (!button) {
+                    return;
+                }
+
+                const sessionId = button.getAttribute('data-stop-session');
+                button.disabled = true;
+                button.textContent = 'Stopping...';
+
+                const response = await fetch(
+                    `/api/control-panel/sessions/${sessionId}/stop`,
+                    {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                    }
+                );
+
+                if (!response.ok) {
+                    button.disabled = false;
+                    button.textContent = 'Leave Meeting';
+                    return;
+                }
+
+                await refreshState();
+            });
+
+            refreshState();
+            refreshHandle = window.setInterval(refreshState, 5000);
+            window.addEventListener('beforeunload', () => {
+                if (refreshHandle) {
+                    window.clearInterval(refreshHandle);
+                }
+            });
+        </script>
+    </body>
+</html>
