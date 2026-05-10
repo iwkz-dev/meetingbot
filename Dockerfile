@@ -16,18 +16,19 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV CI=true
 
 #Install pnpm globally
 RUN npm install -g pnpm
 
 # Copy dependency files
-COPY package.json pnpm-lock.yaml entrypoint.sh ./
+COPY package.json pnpm-lock.yaml .npmrc entrypoint.sh ./
 
 # Convert entrypoint.sh to use Unix line endings
 RUN sed -i 's/\r$//' ./entrypoint.sh
 
-# Install dependencies
-RUN pnpm install
+# Install all dependencies because the runtime starts TypeScript via tsx.
+RUN pnpm install --frozen-lockfile --prod=false
 
 # Install Playwright dependencies
 RUN pnpm dlx playwright@1.52.0 install-deps

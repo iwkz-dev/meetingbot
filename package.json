@@ -2,6 +2,7 @@
     "name": "meetingbot",
     "version": "1.0.0",
     "description": "IWKZ Bot to record online meeting",
+    "packageManager": "pnpm@9",
     "scripts": {
         "start": "tsx src/index.ts",
         "docker:rebuild": "sh ./scripts/docker-rebuild.sh",
