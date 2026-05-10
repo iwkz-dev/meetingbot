@@ -1,0 +1,4 @@
+allowBuilds:
+  "@ffmpeg-installer/linux-x64": true
+  esbuild: true
+  puppeteer: true

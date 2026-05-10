@@ -18,11 +18,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV CI=true
 
-#Install pnpm globally
-RUN npm install -g pnpm
+# Use the pnpm version this repo is configured for.
+RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
 
 # Copy dependency files
-COPY package.json pnpm-lock.yaml .npmrc entrypoint.sh ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml entrypoint.sh ./
 
 # Convert entrypoint.sh to use Unix line endings
 RUN sed -i 's/\r$//' ./entrypoint.sh
@@ -59,9 +59,8 @@ x11-xserver-utils \
 pulseaudio \
 && rm -rf /var/lib/apt/lists/*
 
-#Install pnpm globally
-RUN npm install -g pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Use the pnpm version this repo is configured for.
+RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
 
 # Copy node_modules and package.json from the base stage
 COPY --from=base /app/node_modules /app/node_modules
