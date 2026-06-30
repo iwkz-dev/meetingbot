@@ -1,15 +1,30 @@
-import { Page } from 'playwright';
+import { Locator, Page } from 'playwright';
 import { BotConfig } from './types';
 import { MeetingHandlerInterface } from './MeetingService';
 
-const enterNameField = 'input[type="text"][aria-label="Your name"]';
-const askToJoinButton = '//button[.//span[text()="Ask to join"]]';
-const joinNowButton = '//button[.//span[text()="Join now"]]';
-const gotKickedDetector = '//button[.//span[text()="Return to home screen"]]';
-const leaveButton = `//button[@aria-label="Leave call"]`;
-const peopleButton = `//button[contains(@aria-label, "People")]`;
-const muteButton = `[aria-label*="Turn off microphone"]`; // *= -> conatins
-const cameraOffButton = `[aria-label*="Turn off camera"]`;
+const enterNameFieldSelectors = [
+    'input[type="text"][aria-label="Your name"]',
+    'input[type="text"][aria-label="Ihr Name"]',
+    'input[type="text"]',
+];
+
+const joinButtonPatterns = [
+    /join now/i,
+    /ask to join/i,
+    /jetzt teilnehmen/i,
+    /um teilnahme bitten/i,
+];
+
+const kickedButtonPatterns = [/return to home screen/i, /zur startseite/i];
+const leaveButtonPatterns = [/leave call/i, /anruf verlassen/i];
+const peopleButtonPatterns = [/people/i, /personen/i, /teilnehmer/i];
+const muteButtonPatterns = [/turn off microphone/i, /mikrofon ausschalten/i];
+const cameraOffButtonPatterns = [/turn off camera/i, /kamera ausschalten/i];
+const removedTextPatterns = [
+    /you've been removed from the meeting/i,
+    /you have been removed from the meeting/i,
+    /sie wurden aus dem meeting entfernt/i,
+];
 
 export default class HandlerGMeet implements MeetingHandlerInterface {
     botSettings: BotConfig;
@@ -58,11 +73,11 @@ export default class HandlerGMeet implements MeetingHandlerInterface {
             // Override other properties
             Object.defineProperty(navigator, 'hardwareConcurrency', {
                 get: () => 4,
-            }); // Fake number of CPU cores
-            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 }); // Fake memory size
+            });
+            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
             Object.defineProperty(window, 'innerWidth', {
                 get: () => screenWidth,
-            }); // Fake screen resolution
+            });
             Object.defineProperty(window, 'innerHeight', {
                 get: () => screenHeight,
             });
@@ -74,10 +89,8 @@ export default class HandlerGMeet implements MeetingHandlerInterface {
             });
         });
 
-        //Define Bot Name
         const name = this.botSettings.botDisplayName || 'MeetingBot';
 
-        // Go to the meeting URL (Simulate Movement)
         await this.page.mouse.move(10, 672);
         await this.page.mouse.move(102, 872);
         await this.page.mouse.move(114, 1472);
@@ -85,104 +98,85 @@ export default class HandlerGMeet implements MeetingHandlerInterface {
         await this.page.mouse.move(114, 100);
         await this.page.mouse.click(100, 100);
 
-        //Go
         await this.page.goto(meetingUrl!, { waitUntil: 'networkidle' });
-        await this.page.bringToFront(); //ensure active
+        await this.page.bringToFront();
 
         console.log('Waiting for the input field to be visible...');
-        await this.page.waitForSelector(enterNameField, { timeout: 15000 }); // If it can't find the enter name field in 15 seconds then something went wrong.
+        const enterNameField = await this.waitForFirstVisibleSelector(
+            enterNameFieldSelectors,
+            15000
+        );
 
         console.log('Found it. Waiting for 1 second...');
         await this.page.waitForTimeout(this.randomDelay(1000));
 
         console.log('Filling the input field with the name...');
-        await this.page.fill(enterNameField, name);
+        await enterNameField.fill(name);
 
         console.log('Turning Off Camera and Microphone ...');
         try {
             await this.page.waitForTimeout(this.randomDelay(500));
-            await this.page.click(muteButton, { timeout: 200 });
+            await this.clickFirstButtonByPatterns(muteButtonPatterns, 1000);
             await this.page.waitForTimeout(200);
         } catch (e) {
             console.log('Could not turn off Microphone, probably already off.');
         }
         try {
-            await this.page.click(cameraOffButton, { timeout: 200 });
+            await this.clickFirstButtonByPatterns(cameraOffButtonPatterns, 1000);
             await this.page.waitForTimeout(200);
         } catch (e) {
             console.log('Could not turn off Camera -- probably already off.');
         }
 
-        console.log(
-            'Waiting for either the "Join now" or "Ask to join" button to appear...'
-        );
-        const entryButton = await Promise.race([
-            this.page
-                .waitForSelector(joinNowButton, { timeout: 60000 })
-                .then(() => joinNowButton),
-            this.page
-                .waitForSelector(askToJoinButton, { timeout: 60000 })
-                .then(() => askToJoinButton),
-        ]);
+        console.log('Waiting for a Google Meet entry button to appear...');
+        await this.clickFirstButtonByPatterns(joinButtonPatterns, 60000);
 
-        await this.page.click(entryButton);
-
-        //Should Exit after 1 Minute
         console.log('Awaiting Entry ....');
-        const timeout = this.botSettings.automaticLeave.waitingRoomTimeout; // in milliseconds
+        const timeout = this.botSettings.automaticLeave.waitingRoomTimeout;
 
-        // wait for the leave button to appear (meaning we've joined the meeting)
         try {
-            await this.page.waitForSelector(leaveButton, {
-                timeout: timeout,
-            });
-        } catch (e) {
+            await this.waitForButtonByPatterns(leaveButtonPatterns, timeout);
+        } catch (error) {
             console.error('timeout error');
+            throw new Error(
+                'Google Meet join was not confirmed before waiting room timeout'
+            );
         }
 
-        //Done. Log.
         console.log('Joined Call.');
     }
 
     async isMeetingEnded(): Promise<boolean> {
-        if (
-            (await this.page
-                .locator(gotKickedDetector)
-                .count()
-                .catch(() => 0)) > 0
-        ) {
+        if (await this.isAnyButtonVisible(kickedButtonPatterns, 500)) {
             return true;
         }
-
-        // console.log('Checking for hidden leave button ...');
-        // // Hidden Leave Button (Kick Condition 2)
-        // if (
-        //     await this.page
-        //         .locator(leaveButton)
-        //         .isHidden({ timeout: 500 })
-        //         .catch(() => true)
-        // ) {
-        //     return true;
-        // }
 
         console.log('Checking for removed from meeting text ...');
-        // Removed from Meeting Text (Kick Condition 3)
-        if (
-            await this.page
-                .locator('text="You\'ve been removed from the meeting"')
-                .isVisible({ timeout: 500 })
-                .catch(() => false)
-        ) {
-            return true;
+        for (const pattern of removedTextPatterns) {
+            if (
+                await this.page
+                    .getByText(pattern)
+                    .first()
+                    .isVisible({ timeout: 500 })
+                    .catch(() => false)
+            ) {
+                return true;
+            }
         }
 
-        // Did not get kicked if reached here.
         return false;
     }
 
     async getParticipantCount(): Promise<number | null> {
         try {
-            const peopleLocator = this.page.locator(peopleButton).first();
+            const peopleLocator = await this.getFirstVisibleButtonByPatterns(
+                peopleButtonPatterns,
+                1000
+            );
+            if (!peopleLocator) {
+                return null;
+            }
+
             const ariaLabel = await peopleLocator
                 .getAttribute('aria-label', { timeout: 500 })
                 .catch(() => null);
@@ -199,8 +193,11 @@ export default class HandlerGMeet implements MeetingHandlerInterface {
 
     async leaveMeeting(): Promise<void> {
         try {
-            const leaveLocator = this.page.locator(leaveButton).first();
-            if (await leaveLocator.isVisible({ timeout: 1000 }).catch(() => false)) {
+            const leaveLocator = await this.getFirstVisibleButtonByPatterns(
+                leaveButtonPatterns,
+                1000
+            );
+            if (leaveLocator) {
                 await leaveLocator.click();
                 console.log('Left Google Meet.');
             }
@@ -220,5 +217,78 @@ export default class HandlerGMeet implements MeetingHandlerInterface {
 
         const match = value.match(/(\d+)/);
         return match ? Number(match[1]) : null;
+    }
+
+    private async waitForFirstVisibleSelector(
+        selectors: string[],
+        timeout: number
+    ): Promise<Locator> {
+        const start = Date.now();
+
+        while (Date.now() - start < timeout) {
+            for (const selector of selectors) {
+                const locator = this.page.locator(selector).first();
+                if (
+                    await locator
+                        .isVisible({ timeout: 250 })
+                        .catch(() => false)
+                ) {
+                    return locator;
+                }
+            }
+
+            await this.page.waitForTimeout(200);
+        }
+
+        throw new Error('No matching selector became visible');
+    }
+
+    private async waitForButtonByPatterns(patterns: RegExp[], timeout: number) {
+        const locator = await this.getFirstVisibleButtonByPatterns(
+            patterns,
+            timeout
+        );
+
+        if (!locator) {
+            throw new Error('No matching button became visible');
+        }
+
+        return locator;
+    }
+
+    private async clickFirstButtonByPatterns(
+        patterns: RegExp[],
+        timeout: number
+    ) {
+        const locator = await this.waitForButtonByPatterns(patterns, timeout);
+        await locator.click();
+    }
+
+    private async isAnyButtonVisible(patterns: RegExp[], timeout: number) {
+        return Boolean(
+            await this.getFirstVisibleButtonByPatterns(patterns, timeout)
+        );
+    }
+
+    private async getFirstVisibleButtonByPatterns(
+        patterns: RegExp[],
+        timeout: number
+    ): Promise<Locator | null> {
+        const start = Date.now();
+
+        while (Date.now() - start < timeout) {
+            for (const pattern of patterns) {
+                const button = this.page
+                    .getByRole('button', { name: pattern })
+                    .first();
+                if (await button.isVisible({ timeout: 250 }).catch(() => false)) {
+                    return button;
+                }
+            }
+
+            await this.page.waitForTimeout(200);
+        }
+
+        return null;
     }
 }

@@ -4,37 +4,53 @@ import { MeetingHandlerInterface } from './MeetingService';
 
 const muteButton = '#preview-audio-control-button';
 const stopVideoButton = '#preview-video-control-button';
-const joinButtonSelectors = [
-    'button.zm-btn.preview-join-button',
-    'button:has-text("Join")',
-    'button:has-text("Join Meeting")',
-    'button:has-text("Join Webinar")',
-    'button:has-text("Join Session")',
-];
+const joinButtonSelectors = ['button.zm-btn.preview-join-button'];
 const leaveButton = '.footer__leave-btn-container';
 const acceptCookiesButton = '#onetrust-accept-btn-handler';
 const acceptTermsButton = '#wc_agree1';
 const okButton =
     'button.zm-btn.zm-btn-legacy.zm-btn--primary.zm-btn__outline--blue';
-const leaveConfirmSelectors = [
-    'button:has-text("Leave Meeting")',
-    'button:has-text("Leave Webinar")',
-    'button:has-text("Leave")',
+
+const joinButtonPatterns = [
+    /join/i,
+    /join meeting/i,
+    /join webinar/i,
+    /join session/i,
+    /beitreten/i,
+    /meeting beitreten/i,
+    /webinar beitreten/i,
+    /sitzung beitreten/i,
 ];
-const eventEntrySelectors = [
-    'button:has-text("Join from Your Browser")',
-    'a:has-text("Join from Your Browser")',
-    'button:has-text("Join lobby")',
-    'button:has-text("Join Lobby")',
-    'button:has-text("Join Session")',
-    'button:has-text("Join")',
-    'a:has-text("Join")',
+
+const leaveConfirmPatterns = [
+    /leave meeting/i,
+    /leave webinar/i,
+    /^leave$/i,
+    /meeting verlassen/i,
+    /webinar verlassen/i,
+    /verlassen/i,
 ];
-const endedTextSelectors = [
-    'text=/removed from the meeting/i',
-    'text=/ended by host/i',
-    'text=/meeting has ended/i',
-    'text=/session has ended/i',
+
+const eventEntryPatterns = [
+    /join from your browser/i,
+    /im browser teilnehmen/i,
+    /join lobby/i,
+    /lobby beitreten/i,
+    /join session/i,
+    /sitzung beitreten/i,
+    /^join$/i,
+    /^beitreten$/i,
+];
+
+const endedTextPatterns = [
+    /removed from the meeting/i,
+    /ended by host/i,
+    /meeting has ended/i,
+    /session has ended/i,
+    /aus dem meeting entfernt/i,
+    /vom host beendet/i,
+    /meeting wurde beendet/i,
+    /sitzung wurde beendet/i,
 ];
 
 export default class HandlerZoom implements MeetingHandlerInterface {
@@ -117,9 +133,9 @@ export default class HandlerZoom implements MeetingHandlerInterface {
         await this.dismissCookies(this.page);
         await this.page.waitForTimeout(this.randomDelay(1200));
 
-        const entryButton = await this.findFirstVisible(
+        const entryButton = await this.findFirstVisibleByPatterns(
             this.page,
-            eventEntrySelectors,
+            eventEntryPatterns,
             2000
         );
 
@@ -161,10 +177,10 @@ export default class HandlerZoom implements MeetingHandlerInterface {
             console.error(error);
         }
 
-        for (const selector of endedTextSelectors) {
+        for (const pattern of endedTextPatterns) {
             if (
                 await context
-                    .locator(selector)
+                    .getByText(pattern)
                     .first()
                     .isVisible({ timeout: 300 })
                     .catch(() => false)
@@ -216,8 +232,8 @@ export default class HandlerZoom implements MeetingHandlerInterface {
                     .filter(Boolean);
 
                 const patterns = [
-                    /(\d+)\s+(participants?|attendees?)/i,
-                    /(participants?|attendees?)\D+(\d+)/i,
+                    /(\d+)\s+(participants?|attendees?|teilnehmer)/i,
+                    /(participants?|attendees?|teilnehmer)\D+(\d+)/i,
                 ];
 
                 for (const candidate of candidates) {
@@ -265,9 +281,9 @@ export default class HandlerZoom implements MeetingHandlerInterface {
 
             await leaveLocator.click();
 
-            const confirmLeave = await this.findFirstVisible(
+            const confirmLeave = await this.findFirstVisibleByPatterns(
                 context,
-                leaveConfirmSelectors,
+                leaveConfirmPatterns,
                 1000
             );
 
@@ -342,11 +358,13 @@ export default class HandlerZoom implements MeetingHandlerInterface {
         );
         console.log('Typed name');
 
-        const joinButton = await this.findFirstVisible(
-            context,
-            joinButtonSelectors,
-            5000
-        );
+        const joinButton =
+            (await this.findFirstVisible(context, joinButtonSelectors, 2000)) ??
+            (await this.findFirstVisibleByPatterns(
+                context,
+                joinButtonPatterns,
+                5000
+            ));
 
         if (!joinButton) {
             throw new Error('Zoom join button was not found');
@@ -405,6 +423,34 @@ export default class HandlerZoom implements MeetingHandlerInterface {
             if (await locator.isVisible({ timeout }).catch(() => false)) {
                 return locator;
             }
+        }
+
+        return null;
+    }
+
+    private async findFirstVisibleByPatterns(
+        context: Page | Frame,
+        patterns: RegExp[],
+        timeout: number
+    ): Promise<Locator | null> {
+        const start = Date.now();
+
+        while (Date.now() - start < timeout) {
+            for (const pattern of patterns) {
+                const locator = context.getByRole('button', { name: pattern }).first();
+                if (await locator.isVisible({ timeout: 250 }).catch(() => false)) {
+                    return locator;
+                }
+
+                const linkLocator = context.getByRole('link', { name: pattern }).first();
+                if (
+                    await linkLocator.isVisible({ timeout: 250 }).catch(() => false)
+                ) {
+                    return linkLocator;
+                }
+            }
+
+            await this.page.waitForTimeout(200);
         }
 
         return null;

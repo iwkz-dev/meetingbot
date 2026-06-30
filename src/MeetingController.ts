@@ -15,6 +15,7 @@ import {
     markSessionStarted,
     registerSession,
 } from './runtimeState';
+import fs from 'fs';
 
 const DEFAULT_BOT_NAME = 'IWKZ Bot';
 const DEFAULT_TIMEOUT = 9000; //9 second
@@ -72,11 +73,11 @@ export const createBot = async (
     try {
         await bot.run();
 
-        // Upload recording to GDrive
         meetingRecord = await uploadRecordingToGDrive(
             meetingTitle,
             meetingType,
-            bot
+            bot,
+            sessionId
         );
     } catch (error) {
         markSessionError(error, sessionId);
@@ -93,7 +94,8 @@ export const createBot = async (
 const uploadRecordingToGDrive = async (
     meetingTitle: string,
     meetingType: MeetingType,
-    bot: MeetingBot
+    bot: MeetingBot,
+    sessionId: number
 ) => {
     let gDriveFolderId = '';
     let gDriveTmpFolderId = '';
@@ -110,20 +112,32 @@ const uploadRecordingToGDrive = async (
             break;
     }
 
+    const videoPath = bot.getRecordingVideoPath();
+    const audioPath = bot.getRecordingAudioPath();
+
+    if (!fs.existsSync(videoPath)) {
+        console.warn(
+            `[bot:${sessionId}] Recording video not found at ${videoPath}, skipping Google Drive upload.`
+        );
+        return meetingRecord;
+    }
+
     if (gDriveFolderId !== '' && gDriveTmpFolderId !== '') {
         console.log('Start uploading MP4 to gdrive...');
         meetingRecord = await uploadFileToGDrive(
             meetingTitle,
-            bot.getRecordingVideoPath(),
+            videoPath,
             gDriveFolderId
         );
 
-        console.log('Start uploading MP3 to gdrive...');
-        await uploadFileToGDrive(
-            meetingTitle,
-            bot.getRecordingAudioPath(),
-            gDriveTmpFolderId
-        );
+        if (fs.existsSync(audioPath)) {
+            console.log('Start uploading MP3 to gdrive...');
+            await uploadFileToGDrive(meetingTitle, audioPath, gDriveTmpFolderId);
+        } else {
+            console.warn(
+                `[bot:${sessionId}] Recording audio not found at ${audioPath}, skipping audio upload.`
+            );
+        }
     }
 
     return meetingRecord;
@@ -266,13 +280,14 @@ function dedupeJoinTargets(targets: ZoomJoinTarget[]) {
 }
 
 function extractMeetingId(url: URL) {
-    const pathSegments = url.pathname.split('/').filter(Boolean);
+    const hostname = url.hostname.toLowerCase();
+    const pathname = url.pathname;
 
-    for (const segment of [...pathSegments].reverse()) {
-        if (/^\d{9,12}$/.test(segment)) {
-            return segment;
-        }
+    if (hostname.includes('app.zoom.us')) {
+        const match = pathname.match(/\/wc\/(\d+)\/join/i);
+        return match?.[1];
     }
 
-    return url.searchParams.get('confno') ?? undefined;
+    const match = pathname.match(/\/(?:j|w)\/(\d+)/i);
+    return match?.[1];
 }

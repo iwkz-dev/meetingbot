@@ -49,15 +49,20 @@ WORKDIR /app
 # Change ownership of all files after installation
 RUN useradd -ms /bin/bash meetingbot && chown -R meetingbot:meetingbot /app
 
-# install xvfb, pulseaudio, and xephyr in a single step
+# Install runtime dependencies needed for headful Chromium and ffmpeg capture
 RUN apt-get update && apt-get install -y --no-install-recommends \
-xvfb \
-pulseaudio \
-pulseaudio-utils \
-xserver-xephyr \
-x11-xserver-utils \
-pulseaudio \
-&& rm -rf /var/lib/apt/lists/*
+    ffmpeg \
+    fluxbox \
+    pulseaudio \
+    pulseaudio-utils \
+    x11-xserver-utils \
+    x11-utils \
+    xserver-xephyr \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-create the X11 socket directory so Xvfb can bind as a non-root user
+RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
 # Use the pnpm version this repo is configured for.
 RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
