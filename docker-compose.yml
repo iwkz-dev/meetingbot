@@ -8,8 +8,11 @@ services:
       - .env
     environment:
       PORT: "${PORT:-3010}"
+      DATA_DIR: /app/data
     ports:
       - "${PORT:-3010}:${PORT:-3010}"
+    volumes:
+      - ./data:/app/data
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
@@ -19,7 +22,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "const http=require('http'); const port=process.env.PORT || 3009; http.get({host:'127.0.0.1', port, path:'/health'}, (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));"
+          "const http=require('http'); const port=process.env.PORT || 3010; http.get({host:'127.0.0.1', port, path:'/health'}, (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));"
         ]
       interval: 30s
       timeout: 5s
