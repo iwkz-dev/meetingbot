@@ -285,7 +285,7 @@ The Recall webhook endpoint is a security boundary.
 
 ```mermaid
 flowchart LR
-    R[Recall.ai] -->|Headers + raw payload| E[/api/recall/webhook]
+    R[Recall.ai] -->|Headers + raw payload| E["/api/recall/webhook"]
     E --> V{Signature valid?}
     V -->|No| X[Reject 4xx and do not process]
     V -->|Yes| Q[Dispatch event]
