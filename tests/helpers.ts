@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { AppConfig, createConfig } from '../src/config';
 
 export function buildValidEnv(
@@ -13,7 +14,7 @@ export function buildValidEnv(
         DATA_DIR: './data-test',
         RECALL_REGION: 'eu-central-1',
         RECALL_API_KEY: 'recall-key',
-        RECALL_WORKSPACE_VERIFICATION_SECRET: 'verify-secret',
+        RECALL_WORKSPACE_VERIFICATION_SECRET: 'whsec_c2VjcmV0LXRlc3Qta2V5',
         PUBLIC_API_BASE_URL: 'https://meetingbot.example.com',
         RECALL_WAITING_ROOM_TIMEOUT_SECONDS: '1200',
         RECALL_NOONE_JOINED_TIMEOUT_SECONDS: '1200',
@@ -41,4 +42,37 @@ export function buildConfig(
 
 export async function createTempDir(prefix = 'meetingbot-tests-') {
     return fs.promises.mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+export function signRecallWebhook(args: {
+    payload: string;
+    secret?: string;
+    msgId?: string;
+    timestamp?: string;
+    includeLegacyHeaders?: boolean;
+    extraSignatures?: string[];
+}) {
+    const secret = args.secret ?? 'whsec_c2VjcmV0LXRlc3Qta2V5';
+    const msgId = args.msgId ?? 'msg_test_123';
+    const timestamp = args.timestamp ?? '1731705121';
+    const key = Buffer.from(secret.slice('whsec_'.length), 'base64');
+    const expectedSig = crypto
+        .createHmac('sha256', key)
+        .update(`${msgId}.${timestamp}.${args.payload}`)
+        .digest('base64');
+    const signatureHeader = [`v1,${expectedSig}`, ...(args.extraSignatures ?? [])].join(' ');
+
+    if (args.includeLegacyHeaders) {
+        return {
+            'svix-id': msgId,
+            'svix-timestamp': timestamp,
+            'svix-signature': signatureHeader,
+        };
+    }
+
+    return {
+        'webhook-id': msgId,
+        'webhook-timestamp': timestamp,
+        'webhook-signature': signatureHeader,
+    };
 }

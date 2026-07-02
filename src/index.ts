@@ -11,6 +11,11 @@ import {
 } from './MeetingController';
 import { MeetingStore } from './MeetingStore';
 import { RecallClient } from './RecallClient';
+import {
+    RecallWebhookService,
+    type RecallWebhookPayload,
+} from './RecallWebhookService';
+import { RecallWebhookVerificationError } from './RecallWebhookVerifier';
 import { buildControlPanelState } from './runtimeState';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -18,12 +23,21 @@ const config = getConfig();
 const store = await MeetingStore.create(config.dataDir);
 const recallClient = new RecallClient(config);
 const meetingController = new MeetingController(store, recallClient, config);
+const recallWebhookService = new RecallWebhookService(store, recallClient, config);
 const app = express();
 const controlPanelPassword = config.controlPanelPassword;
 const authCookieName = 'meetingbot_panel_auth';
 const authCookieValue = controlPanelPassword
     ? createHash('sha256').update(controlPanelPassword).digest('hex')
     : '';
+
+app.post(
+    '/api/recall/webhook',
+    express.raw({ type: 'application/json' }),
+    async (req, res) => {
+        await handleRecallWebhook(req, res);
+    },
+);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -134,6 +148,34 @@ async function leaveMeeting(req: Request, res: Response) {
     }
 }
 
+async function handleRecallWebhook(req: Request, res: Response) {
+    try {
+        const rawBody = Buffer.isBuffer(req.body)
+            ? req.body
+            : Buffer.from(String(req.body ?? ''), 'utf8');
+        const payload = recallWebhookService.verifyAndParse(
+            rawBody,
+            req.headers,
+        ) as RecallWebhookPayload;
+
+        res.status(202).send({ result: 'ok' });
+        recallWebhookService.acknowledgeAndProcess(payload);
+    } catch (error) {
+        if (error instanceof RecallWebhookVerificationError) {
+            res.status(error.statusCode).send({
+                result: 'error',
+                message: error.message,
+            });
+            return;
+        }
+
+        res.status(500).send({
+            result: 'error',
+            message: error instanceof Error ? error.message : String(error),
+        });
+    }
+}
+
 function handleControllerError(error: unknown, res: Response) {
     if (error instanceof MeetingControllerError) {
         res.status(error.statusCode).send({
@@ -199,4 +241,3 @@ function buildCookie(name: string, value: string, maxAgeSeconds: number) {
         `Max-Age=${maxAgeSeconds}`,
     ].join('; ');
 }
-
