@@ -295,6 +295,7 @@ export class RecallWebhookService {
                 recallRecordingId: recordingId,
                 transcriptRequestedAt: this.now(),
                 status: 'transcribing',
+                artifactProcessingMode: null,
                 recallStatusCode: payload.data.data?.code ?? current.recallStatusCode,
                 recallStatusSubCode:
                     payload.data.data?.sub_code ?? current.recallStatusSubCode,
@@ -319,9 +320,9 @@ export class RecallWebhookService {
             await this.store.updateJob(meeting.id, (current) => ({
                 ...current,
                 recallRecordingId: recordingId,
-                status: current.recallRecordingId || recordingId
-                    ? 'completed_with_errors'
-                    : 'failed',
+                status: 'uploading',
+                processingStartedAt: current.processingStartedAt ?? this.now(),
+                artifactProcessingMode: 'video_only',
                 lastError: safeMessage,
                 recallStatusCode: payload.data.data?.code ?? current.recallStatusCode,
                 recallStatusSubCode:
@@ -385,6 +386,7 @@ export class RecallWebhookService {
                 recallTranscriptId: transcriptId,
                 status: 'uploading',
                 processingStartedAt: current.processingStartedAt ?? this.now(),
+                artifactProcessingMode: 'full',
                 recallStatusCode: payload.data.data?.code ?? current.recallStatusCode,
                 recallStatusSubCode:
                     payload.data.data?.sub_code ?? current.recallStatusSubCode,
@@ -407,8 +409,9 @@ export class RecallWebhookService {
             ...current,
             recallTranscriptId: transcriptId ?? current.recallTranscriptId,
             recallRecordingId: recordingId ?? current.recallRecordingId,
-            status: 'completed_with_errors',
+            status: 'uploading',
             processingStartedAt: current.processingStartedAt ?? this.now(),
+            artifactProcessingMode: 'video_only',
             lastError:
                 extractRecallMessage(payload) ??
                 current.lastError ??
@@ -501,3 +504,6 @@ function buildSafeWebhookError(error: unknown) {
 
     return error instanceof Error ? error.message : String(error);
 }
+
+
+

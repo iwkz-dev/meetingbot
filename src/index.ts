@@ -9,6 +9,7 @@ import {
     MeetingControllerError,
     buildRuntimeStats,
 } from './MeetingController';
+import { MeetingProcessingService } from './MeetingProcessingService';
 import { MeetingStore } from './MeetingStore';
 import { RecallClient } from './RecallClient';
 import {
@@ -23,13 +24,32 @@ const config = getConfig();
 const store = await MeetingStore.create(config.dataDir);
 const recallClient = new RecallClient(config);
 const meetingController = new MeetingController(store, recallClient, config);
-const recallWebhookService = new RecallWebhookService(store, recallClient, config);
+const meetingProcessingService = new MeetingProcessingService(
+    store,
+    recallClient,
+    config,
+);
+const recallWebhookService = new RecallWebhookService(store, recallClient, config, {
+    queueArtifactProcessing: (meetingId, options) =>
+        meetingProcessingService.processCompletedMeeting(meetingId, options),
+});
 const app = express();
 const controlPanelPassword = config.controlPanelPassword;
 const authCookieName = 'meetingbot_panel_auth';
 const authCookieValue = controlPanelPassword
     ? createHash('sha256').update(controlPanelPassword).digest('hex')
     : '';
+
+void meetingProcessingService
+    .resumeInterruptedJobs()
+    .then((count) => {
+        if (count > 0) {
+            console.log(`[startup] Requeued ${count} interrupted artifact job(s)`);
+        }
+    })
+    .catch((error) => {
+        console.error('[startup] Failed to requeue interrupted artifact jobs', error);
+    });
 
 app.post(
     '/api/recall/webhook',

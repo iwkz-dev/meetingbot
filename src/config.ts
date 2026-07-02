@@ -25,9 +25,7 @@ export type AppConfig = {
     gdriveRefreshToken: string;
     gdriveOauthRedirectUri: string;
     gdriveFolderRapat: string;
-    gdriveFolderRapatTmp: string;
     gdriveFolderSeminar: string;
-    gdriveFolderSeminarTmp: string;
 };
 
 export type ConfigOptions = {
@@ -82,9 +80,7 @@ export function createConfig(
     const gdriveRefreshToken = required('GDRIVE_REFRESH_TOKEN');
     const gdriveOauthRedirectUri = required('GDRIVE_OAUTH_REDIRECT_URI');
     const gdriveFolderRapat = required('GDRIVE_FOLDER_RAPAT');
-    const gdriveFolderRapatTmp = required('GDRIVE_FOLDER_RAPAT_TMP');
     const gdriveFolderSeminar = required('GDRIVE_FOLDER_SEMINAR');
-    const gdriveFolderSeminarTmp = required('GDRIVE_FOLDER_SEMINAR_TMP');
 
     if (publicApiBaseUrl) {
         validatePublicApiBaseUrl(publicApiBaseUrl);
@@ -134,9 +130,7 @@ export function createConfig(
         gdriveRefreshToken,
         gdriveOauthRedirectUri,
         gdriveFolderRapat,
-        gdriveFolderRapatTmp,
         gdriveFolderSeminar,
-        gdriveFolderSeminarTmp,
     };
 }
 

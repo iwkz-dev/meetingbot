@@ -27,9 +27,7 @@ export function buildValidEnv(
         GDRIVE_OAUTH_REDIRECT_URI:
             'https://developers.google.com/oauthplayground',
         GDRIVE_FOLDER_RAPAT: 'folder-rapat',
-        GDRIVE_FOLDER_RAPAT_TMP: 'folder-rapat-tmp',
         GDRIVE_FOLDER_SEMINAR: 'folder-seminar',
-        GDRIVE_FOLDER_SEMINAR_TMP: 'folder-seminar-tmp',
         ...overrides,
     };
 }

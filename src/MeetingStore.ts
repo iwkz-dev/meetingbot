@@ -50,11 +50,13 @@ export class MeetingStore {
             recallStatusMessage: null,
             transcriptRequestedAt: null,
             processingStartedAt: null,
+            artifactProcessingMode: null,
             stopRequestedAt: null,
             createdAt: now,
             updatedAt: now,
             joinedAt: null,
             completedAt: null,
+            driveFolder: null,
             videoUpload: null,
             transcriptJsonUpload: null,
             transcriptTextUpload: null,
@@ -97,7 +99,7 @@ export class MeetingStore {
                 throw new Error(`Meeting job not found: ${id}`);
             }
 
-            const next = updater(structuredClone(current));
+            const next = normalizeMeetingJob(updater(structuredClone(current)));
             next.updatedAt = new Date().toISOString();
             this.jobs[index] = next;
             this.pruneJobs();
@@ -130,7 +132,9 @@ export class MeetingStore {
         try {
             const content = await fs.promises.readFile(this.filePath, 'utf8');
             const parsed = JSON.parse(content);
-            this.jobs = Array.isArray(parsed) ? parsed : [];
+            this.jobs = Array.isArray(parsed)
+                ? parsed.map((item) => normalizeMeetingJob(item))
+                : [];
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
                 throw error;
@@ -177,3 +181,16 @@ export class MeetingStore {
         this.jobs = this.jobs.filter((job) => retained.has(job.id));
     }
 }
+
+function normalizeMeetingJob(value: MeetingJob): MeetingJob {
+    return {
+        ...value,
+        artifactProcessingMode: value.artifactProcessingMode ?? null,
+        driveFolder: value.driveFolder ?? null,
+        videoUpload: value.videoUpload ?? null,
+        transcriptJsonUpload: value.transcriptJsonUpload ?? null,
+        transcriptTextUpload: value.transcriptTextUpload ?? null,
+        lastError: value.lastError ?? null,
+    };
+}
+

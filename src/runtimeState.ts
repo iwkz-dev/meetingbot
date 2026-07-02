@@ -17,6 +17,7 @@ export function serializeMeetingForControlPanel(
         createdAt: meeting.createdAt,
         joinedAt: meeting.joinedAt,
         completedAt: meeting.completedAt,
+        driveFolder: meeting.driveFolder,
         videoUpload: meeting.videoUpload,
         transcriptJsonUpload: meeting.transcriptJsonUpload,
         transcriptTextUpload: meeting.transcriptTextUpload,

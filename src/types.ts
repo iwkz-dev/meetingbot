@@ -21,6 +21,12 @@ export type DriveArtifact = {
     link: string;
 };
 
+export type DriveFolder = {
+    id: string;
+    name: string;
+    link: string | null;
+};
+
 export type MeetingJob = {
     id: string;
     recallBotId: string | null;
@@ -36,11 +42,13 @@ export type MeetingJob = {
     recallStatusMessage: string | null;
     transcriptRequestedAt: string | null;
     processingStartedAt: string | null;
+    artifactProcessingMode: 'full' | 'video_only' | null;
     stopRequestedAt: string | null;
     createdAt: string;
     updatedAt: string;
     joinedAt: string | null;
     completedAt: string | null;
+    driveFolder: DriveFolder | null;
     videoUpload: DriveArtifact | null;
     transcriptJsonUpload: DriveArtifact | null;
     transcriptTextUpload: DriveArtifact | null;
@@ -69,6 +77,7 @@ export type ControlPanelMeeting = {
     createdAt: string;
     joinedAt: string | null;
     completedAt: string | null;
+    driveFolder: DriveFolder | null;
     videoUpload: DriveArtifact | null;
     transcriptJsonUpload: DriveArtifact | null;
     transcriptTextUpload: DriveArtifact | null;
@@ -159,3 +168,4 @@ export type RecallCreateBotPayload = {
 export type RecallBotResponse = {
     id: string;
 };
+

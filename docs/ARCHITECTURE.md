@@ -240,12 +240,12 @@ Last error
 
 ## 7. Google Drive output routing
 
-| Meeting type | Recording | Transcript JSON | Readable transcript TXT |
+| Meeting type | Parent folder | Per-meeting subfolder | Uploaded artifacts |
 |---|---|---|---|
-| `RAPAT` | `GDRIVE_FOLDER_RAPAT` | `GDRIVE_FOLDER_RAPAT_TMP` | `GDRIVE_FOLDER_RAPAT_TMP` |
-| `SEMINAR` | `GDRIVE_FOLDER_SEMINAR` | `GDRIVE_FOLDER_SEMINAR_TMP` | `GDRIVE_FOLDER_SEMINAR_TMP` |
+| RAPAT | GDRIVE_FOLDER_RAPAT | <sanitized-meeting-subject>_<YYYY-MM-DD> | MP4, transcript JSON, transcript TXT |
+| SEMINAR | GDRIVE_FOLDER_SEMINAR | <sanitized-meeting-subject>_<YYYY-MM-DD> | MP4, transcript JSON, transcript TXT |
 
-No audio-only file is uploaded in the Recall architecture.
+All artifacts for a processed meeting are uploaded into the same per-meeting subfolder. No audio-only file is uploaded in the Recall architecture.
 
 ### Deterministic filenames
 
@@ -441,3 +441,5 @@ When usage grows beyond one container, evolve the architecture in this order:
 5. Add object storage as a staging area for large media.
 6. Add user accounts, authorization, and tenant-specific Drive routing.
 7. Add scheduling and calendar integrations while retaining the same `join_at` abstraction.
+
+

@@ -319,3 +319,45 @@ test('unknown verified event is acknowledged safely', async () => {
     );
     assert.ok(infoLog);
 });
+
+test('transcript.failed keeps uploading state and requests video-only processing', async () => {
+    const state = await createService();
+    const meetingId = await seedMeeting(state);
+
+    await state.service.processVerifiedWebhook(
+        buildPayload('transcript.failed', {
+            data: {
+                data: {
+                    code: 'failed',
+                    sub_code: 'transcript_error',
+                    updated_at: '2026-07-02T15:00:00.000Z',
+                    message: 'Recall transcript failed',
+                },
+                bot: {
+                    id: 'recall-bot-1',
+                    metadata: {
+                        meetingbot_job_id: meetingId,
+                    },
+                },
+                recording: {
+                    id: 'recording-1',
+                    metadata: {},
+                },
+                transcript: {
+                    id: 'transcript-1',
+                    metadata: {},
+                },
+            },
+        }),
+    );
+
+    const updated = await state.store.getById(meetingId);
+    assert.equal(updated?.status, 'uploading');
+    assert.equal(updated?.artifactProcessingMode, 'video_only');
+    assert.equal(updated?.processingStartedAt, '2026-07-02T15:00:00.000Z');
+    assert.deepEqual(state.processingQueueCalls[0], {
+        meetingId,
+        videoOnly: true,
+    });
+});
+

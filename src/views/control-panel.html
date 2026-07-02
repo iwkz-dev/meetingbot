@@ -201,7 +201,7 @@
                         <div class="chip-row">
                             <span class="chip">${escapeHtml(meeting.id)}</span>
                             <span class="chip">${escapeHtml(meeting.meetingType)}</span>
-                            <span class="chip">${escapeHtml(meeting.status)}</span>
+                            <span class="chip">${escapeHtml(formatStatusLabel(meeting.status))}</span>
                             <span class="chip">${escapeHtml(meeting.botDisplayName)}</span>
                         </div>
                         <div class="meta">
@@ -275,3 +275,4 @@
         </script>
     </body>
 </html>
+

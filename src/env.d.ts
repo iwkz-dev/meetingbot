@@ -19,8 +19,6 @@ declare namespace NodeJS {
         GDRIVE_REFRESH_TOKEN?: string;
         GDRIVE_OAUTH_REDIRECT_URI?: string;
         GDRIVE_FOLDER_RAPAT?: string;
-        GDRIVE_FOLDER_RAPAT_TMP?: string;
         GDRIVE_FOLDER_SEMINAR?: string;
-        GDRIVE_FOLDER_SEMINAR_TMP?: string;
     }
 }
