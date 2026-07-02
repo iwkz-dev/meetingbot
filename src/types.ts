@@ -91,6 +91,27 @@ export type InviteMeetingInput = {
     meetingType: MeetingType;
 };
 
+export type InviteMeetingResult = {
+    result: 'ok';
+    message: 'bot join request accepted';
+    meeting: {
+        id: string;
+        recallBotId: string;
+        meetingSubject: string;
+        status: 'joining';
+    };
+};
+
+export type LeaveMeetingResult = {
+    result: 'ok';
+    message: string;
+    meeting: {
+        id: string;
+        recallBotId: string;
+        status: MeetingJobStatus;
+    };
+};
+
 export type RecallRegion =
     | 'us-west-2'
     | 'us-east-1'
@@ -102,4 +123,39 @@ export type RecallAutomaticLeaveConfig = {
     nooneJoinedTimeoutSeconds: number;
     everyoneLeftTimeoutSeconds: number;
     everyoneLeftActivateAfterSeconds: number;
+};
+
+export type RecallCreateBotPayload = {
+    meeting_url: string;
+    join_at: string;
+    bot_name: string;
+    recording_config: {
+        video_mixed_mp4: Record<string, never>;
+        participant_events: Record<string, never>;
+        meeting_metadata: Record<string, never>;
+    };
+    automatic_leave: {
+        waiting_room_timeout: number;
+        noone_joined_timeout: number;
+        everyone_left_timeout: {
+            timeout: number;
+            activate_after: number;
+        };
+    };
+    metadata: {
+        meetingbot_job_id: string;
+        meeting_subject: string;
+        meeting_type: 'rapat' | 'seminar';
+    };
+    chat?: {
+        on_bot_join: {
+            send_to: 'everyone';
+            message: string;
+            pin: true;
+        };
+    };
+};
+
+export type RecallBotResponse = {
+    id: string;
 };

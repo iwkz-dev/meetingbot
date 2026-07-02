@@ -57,12 +57,15 @@
             input, select { padding: 12px 14px; border: 1px solid var(--line); background: white; color: var(--text); }
             button { padding: 12px 16px; border: none; cursor: pointer; color: white; background: var(--accent); font-weight: 600; }
             button.secondary { background: #8d7d66; }
+            button.leave { background: var(--danger); }
+            button:disabled { opacity: 0.6; cursor: wait; }
             .meetings { display: grid; gap: 14px; }
             .meeting { padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: white; }
             .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
             .chip { padding: 6px 10px; border-radius: 999px; background: var(--chip); font-size: 0.84rem; font-weight: 600; }
             .meta { display: grid; gap: 10px; color: var(--muted); font-size: 0.94rem; word-break: break-word; }
             .meta strong { color: var(--text); }
+            .actions { margin-top: 14px; display: flex; gap: 10px; }
             .notice { min-height: 24px; color: var(--muted); font-size: 0.95rem; }
             .notice.error { color: var(--danger); }
             .empty { padding: 18px; border-radius: 18px; background: var(--chip); color: var(--muted); }
@@ -79,8 +82,8 @@
                 <div>
                     <h1>Meeting Bot Control Panel</h1>
                     <p>
-                        Recall.ai foundation is in place. Prompt 1 keeps the control panel and
-                        Google Drive preparation while the live bot lifecycle arrives in Prompt 2.
+                        Recall.ai bot creation is active. Submit a meeting, track the persisted
+                        lifecycle state here, and use Leave Meeting when you need to stop a live bot.
                     </p>
                 </div>
                 <form method="POST" action="/control-panel/logout">
@@ -135,6 +138,7 @@
             const meetingsNode = document.getElementById('meetings');
             const inviteForm = document.getElementById('invite-form');
             const inviteNotice = document.getElementById('invite-notice');
+            let leaveInFlightMeetingId = null;
 
             function formatTime(value) {
                 if (!value) return '-';
@@ -149,6 +153,13 @@
                     .replaceAll('>', '&gt;')
                     .replaceAll('"', '&quot;')
                     .replaceAll("'", '&#39;');
+            }
+
+            function canLeaveMeeting(meeting) {
+                return Boolean(
+                    meeting.recallBotId &&
+                    !['completed', 'completed_with_errors', 'failed'].includes(meeting.status)
+                );
             }
 
             async function fetchState() {
@@ -179,7 +190,12 @@
                     return;
                 }
 
-                meetingsNode.innerHTML = meetings.map((meeting) => `
+                meetingsNode.innerHTML = meetings.map((meeting) => {
+                    const leaveButton = canLeaveMeeting(meeting)
+                        ? `<div class="actions"><button class="leave" data-meeting-id="${escapeHtml(meeting.id)}" ${leaveInFlightMeetingId === meeting.id ? 'disabled' : ''}>${leaveInFlightMeetingId === meeting.id ? 'Leaving...' : 'Leave Meeting'}</button></div>`
+                        : '';
+
+                    return `
                     <article class="meeting">
                         <h3>${escapeHtml(meeting.meetingSubject)}</h3>
                         <div class="chip-row">
@@ -202,14 +218,43 @@
                             <div><strong>Transcript JSON:</strong> ${meeting.transcriptJsonUpload ? `<a target="_blank" rel="noopener noreferrer" href="${escapeHtml(meeting.transcriptJsonUpload.link)}">${escapeHtml(meeting.transcriptJsonUpload.name)}</a>` : '-'}</div>
                             <div><strong>Transcript TXT:</strong> ${meeting.transcriptTextUpload ? `<a target="_blank" rel="noopener noreferrer" href="${escapeHtml(meeting.transcriptTextUpload.link)}">${escapeHtml(meeting.transcriptTextUpload.name)}</a>` : '-'}</div>
                         </div>
-                    </article>
-                `).join('');
+                        ${leaveButton}
+                    </article>`;
+                }).join('');
+
+                for (const button of meetingsNode.querySelectorAll('button[data-meeting-id]')) {
+                    button.addEventListener('click', async () => {
+                        const meetingId = button.getAttribute('data-meeting-id');
+                        if (!meetingId) return;
+
+                        leaveInFlightMeetingId = meetingId;
+                        inviteNotice.className = 'notice';
+                        inviteNotice.textContent = 'Sending leave request...';
+                        renderMeetings(meetings);
+
+                        try {
+                            const response = await fetch(`/api/control-panel/meetings/${encodeURIComponent(meetingId)}/leave`, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                            });
+                            const result = await response.json().catch(() => ({}));
+                            inviteNotice.className = response.ok ? 'notice' : 'notice error';
+                            inviteNotice.textContent = result.message || 'Leave request failed.';
+                        } catch {
+                            inviteNotice.className = 'notice error';
+                            inviteNotice.textContent = 'Leave request failed.';
+                        } finally {
+                            leaveInFlightMeetingId = null;
+                            await fetchState().catch(() => {});
+                        }
+                    });
+                }
             }
 
             inviteForm.addEventListener('submit', async (event) => {
                 event.preventDefault();
                 inviteNotice.className = 'notice';
-                inviteNotice.textContent = 'Prompt 1 foundation is active...';
+                inviteNotice.textContent = 'Submitting Recall bot join request...';
 
                 const payload = Object.fromEntries(new FormData(inviteForm).entries());
                 const response = await fetch('/api/control-panel/invite', {
@@ -222,6 +267,7 @@
 
                 inviteNotice.className = response.ok ? 'notice' : 'notice error';
                 inviteNotice.textContent = result.message || 'Request failed.';
+                await fetchState().catch(() => {});
             });
 
             fetchState();

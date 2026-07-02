@@ -4,17 +4,20 @@ import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getConfig } from './config';
-import { MeetingStore } from './MeetingStore';
 import {
-    buildInviteMeetingInput,
+    MeetingController,
+    MeetingControllerError,
     buildRuntimeStats,
-    ensurePromptOneReadyMessage,
 } from './MeetingController';
+import { MeetingStore } from './MeetingStore';
+import { RecallClient } from './RecallClient';
 import { buildControlPanelState } from './runtimeState';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const config = getConfig();
 const store = await MeetingStore.create(config.dataDir);
+const recallClient = new RecallClient(config);
+const meetingController = new MeetingController(store, recallClient, config);
 const app = express();
 const controlPanelPassword = config.controlPanelPassword;
 const authCookieName = 'meetingbot_panel_auth';
@@ -87,20 +90,25 @@ app.post('/api/control-panel/invite', requireControlPanelAuth, async (req, res) 
     await queueBotInvite(req, res);
 });
 
-app.post(
-    '/api/control-panel/sessions/:sessionId/stop',
-    requireControlPanelAuth,
-    async (_req, res) => {
-        res.status(501).send({
-            result: 'error',
-            message: ensurePromptOneReadyMessage(),
-        });
-    },
-);
-
 app.post('/invite-bot', async (req, res) => {
     await queueBotInvite(req, res);
 });
+
+app.post(
+    '/api/control-panel/meetings/:meetingId/leave',
+    requireControlPanelAuth,
+    async (req, res) => {
+        await leaveMeeting(req, res);
+    },
+);
+
+app.post(
+    '/api/control-panel/sessions/:meetingId/stop',
+    requireControlPanelAuth,
+    async (req, res) => {
+        await leaveMeeting(req, res);
+    },
+);
 
 app.listen(config.port, () => {
     console.log(`App started on port  ${config.port}`);
@@ -110,18 +118,34 @@ export default app;
 
 async function queueBotInvite(req: Request, res: Response) {
     try {
-        buildInviteMeetingInput(req.body);
+        const result = await meetingController.inviteBot(req.body);
+        res.status(202).send(result);
     } catch (error) {
-        res.status(400).send({
+        handleControllerError(error, res);
+    }
+}
+
+async function leaveMeeting(req: Request, res: Response) {
+    try {
+        const result = await meetingController.leaveMeeting(req.params.meetingId ?? '');
+        res.status(202).send(result);
+    } catch (error) {
+        handleControllerError(error, res);
+    }
+}
+
+function handleControllerError(error: unknown, res: Response) {
+    if (error instanceof MeetingControllerError) {
+        res.status(error.statusCode).send({
             result: 'error',
-            message: error instanceof Error ? error.message : String(error),
+            message: error.message,
         });
         return;
     }
 
-    res.status(501).send({
+    res.status(500).send({
         result: 'error',
-        message: ensurePromptOneReadyMessage(),
+        message: error instanceof Error ? error.message : String(error),
     });
 }
 
@@ -175,3 +199,4 @@ function buildCookie(name: string, value: string, maxAgeSeconds: number) {
         `Max-Age=${maxAgeSeconds}`,
     ].join('; ');
 }
+
