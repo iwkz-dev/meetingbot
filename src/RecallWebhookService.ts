@@ -308,7 +308,7 @@ export class RecallWebhookService {
             await this.recallClient.createTranscript(recordingId, {
                 provider: {
                     recallai_async: {
-                        language_code: 'auto',
+                        language_code: 'id',
                     },
                 },
                 diarization: {
@@ -504,6 +504,7 @@ function buildSafeWebhookError(error: unknown) {
 
     return error instanceof Error ? error.message : String(error);
 }
+
 
 
 
