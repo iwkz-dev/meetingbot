@@ -51,6 +51,41 @@ test('MeetingController creates a Recall bot and persists joining state', async 
     assert.equal(body.chat.on_bot_join.message, 'Welcome everyone');
 });
 
+test('MeetingController normalizes Recall activate_after to at least 1', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const config = buildConfig({
+        RECALL_EVERYONE_LEFT_ACTIVATE_AFTER_SECONDS: '0',
+    });
+    const store = await MeetingStore.create(
+        await createTempDir('meetingbot-controller-activate-after-'),
+    );
+    const recallClient = new RecallClient(config, {
+        fetchImpl: async (url, init) => {
+            requests.push({ url: String(url), init });
+            return new Response(
+                JSON.stringify({ id: 'recall-bot-activate-after' }),
+                {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                },
+            );
+        },
+        jitterMs: () => 0,
+        sleep: async () => undefined,
+    });
+    const controller = new MeetingController(store, recallClient, config);
+
+    await controller.inviteBot({
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
+        meetingSubject: 'Weekly Coordination',
+        botDisplayName: 'IWKZ Bot',
+        meetingType: 'rapat',
+    });
+
+    const body = JSON.parse(String(requests[0]?.init?.body ?? '{}'));
+    assert.equal(body.automatic_leave.everyone_left_timeout.activate_after, 1);
+});
+
 test('MeetingController rejects an invalid meeting type before calling Recall', async () => {
     let fetchCalls = 0;
     const config = buildConfig();

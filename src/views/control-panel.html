@@ -162,6 +162,25 @@
                 );
             }
 
+            function formatStatusLabel(status) {
+                const labels = {
+                    creating_bot: 'Creating Bot',
+                    joining: 'Joining',
+                    waiting_room: 'Waiting Room',
+                    in_call_not_recording: 'In Call',
+                    recording: 'Recording',
+                    leaving: 'Leaving',
+                    call_ended: 'Call Ended',
+                    recording_processing: 'Processing Recording',
+                    transcribing: 'Transcribing',
+                    uploading: 'Uploading',
+                    completed: 'Completed',
+                    completed_with_errors: 'Completed With Errors',
+                    failed: 'Failed',
+                };
+
+                return labels[status] || status;
+            }
             async function fetchState() {
                 const response = await fetch('/api/control-panel/state', { credentials: 'same-origin' });
                 if (response.status === 401) {
@@ -275,4 +294,6 @@
         </script>
     </body>
 </html>
+
+
 

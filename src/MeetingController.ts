@@ -280,8 +280,9 @@ function buildRecallCreateBotPayload(
             noone_joined_timeout: config.recallAutomaticLeave.nooneJoinedTimeoutSeconds,
             everyone_left_timeout: {
                 timeout: config.recallAutomaticLeave.everyoneLeftTimeoutSeconds,
-                activate_after:
+                activate_after: normalizeRecallActivateAfterSeconds(
                     config.recallAutomaticLeave.everyoneLeftActivateAfterSeconds,
+                ),
             },
         },
         metadata: {
@@ -376,5 +377,10 @@ function expectString(value: string | null, message: string) {
     }
 
     return value;
+}
+
+
+function normalizeRecallActivateAfterSeconds(value: number) {
+    return Math.max(1, value);
 }
 
