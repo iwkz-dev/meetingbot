@@ -47,6 +47,8 @@ test('MeetingStore creates, updates, and reloads persisted jobs', async () => {
 
     assert.equal(updated.recallBotId, 'recall-bot-1');
     assert.equal(updated.status, 'recording');
+    assert.equal(updated.aiContent.kind, 'rapat_meeting_notes');
+    assert.equal(updated.aiContent.status, 'not_ready');
 
     const reloaded = await MeetingStore.create(dataDir);
     const byId = await reloaded.getById(job.id);
@@ -65,6 +67,97 @@ test('MeetingStore creates, updates, and reloads persisted jobs', async () => {
     const parsed = JSON.parse(raw);
     assert.equal(parsed.length, 1);
     assert.equal(parsed[0]?.onJoinMessage, 'This meeting is being recorded.');
+    assert.equal(parsed[0]?.aiContent?.kind, 'rapat_meeting_notes');
+});
+
+test('MeetingStore derives default AI state for older persisted records', async () => {
+    const dataDir = await createTempDir();
+    const filePath = path.join(dataDir, 'meetings.json');
+    await fs.promises.mkdir(dataDir, { recursive: true });
+    await fs.promises.writeFile(
+        filePath,
+        JSON.stringify([
+            {
+                id: 'legacy-seminar',
+                recallBotId: null,
+                recallRecordingId: null,
+                recallTranscriptId: null,
+                meetingUrl: 'https://meet.google.com/example',
+                meetingSubject: 'Legacy Seminar',
+                botDisplayName: 'IWKZ Bot',
+                meetingType: 'SEMINAR',
+                onJoinMessage: '',
+                status: 'completed',
+                recallStatusCode: null,
+                recallStatusSubCode: null,
+                recallStatusMessage: null,
+                transcriptRequestedAt: null,
+                processingStartedAt: null,
+                artifactProcessingMode: 'full',
+                stopRequestedAt: null,
+                createdAt: '2026-07-03T08:00:00.000Z',
+                updatedAt: '2026-07-03T08:10:00.000Z',
+                joinedAt: null,
+                completedAt: '2026-07-03T09:00:00.000Z',
+                driveFolder: { id: 'folder-1', name: 'Legacy', link: 'https://drive.example/folder-1' },
+                videoUpload: { id: 'video-1', name: 'legacy.mp4', link: 'https://drive.example/video-1' },
+                transcriptJsonUpload: { id: 'json-1', name: 'legacy.transcript.json', link: 'https://drive.example/json-1' },
+                transcriptTextUpload: { id: 'txt-1', name: 'legacy.transcript.txt', link: 'https://drive.example/txt-1' },
+                participantJsonUpload: null,
+                participantTextUpload: null,
+                participantArtifactStatus: null,
+                participantArtifactError: null,
+                participantArtifactAttempts: 0,
+                participantArtifactNextRetryAt: null,
+                lastError: null,
+            },
+            {
+                id: 'legacy-rapat',
+                recallBotId: null,
+                recallRecordingId: null,
+                recallTranscriptId: null,
+                meetingUrl: 'https://meet.google.com/example',
+                meetingSubject: 'Legacy Rapat',
+                botDisplayName: 'IWKZ Bot',
+                meetingType: 'RAPAT',
+                onJoinMessage: '',
+                status: 'completed_with_errors',
+                recallStatusCode: null,
+                recallStatusSubCode: null,
+                recallStatusMessage: null,
+                transcriptRequestedAt: null,
+                processingStartedAt: null,
+                artifactProcessingMode: 'full',
+                stopRequestedAt: null,
+                createdAt: '2026-07-02T08:00:00.000Z',
+                updatedAt: '2026-07-02T08:10:00.000Z',
+                joinedAt: null,
+                completedAt: '2026-07-02T09:00:00.000Z',
+                driveFolder: null,
+                videoUpload: null,
+                transcriptJsonUpload: null,
+                transcriptTextUpload: { id: 'txt-2', name: 'legacy-rapat.transcript.txt', link: 'https://drive.example/txt-2' },
+                participantJsonUpload: null,
+                participantTextUpload: null,
+                participantArtifactStatus: null,
+                participantArtifactError: null,
+                participantArtifactAttempts: 0,
+                participantArtifactNextRetryAt: null,
+                lastError: 'transcript only',
+            },
+        ], null, 2),
+        'utf8',
+    );
+
+    const store = await MeetingStore.create(dataDir);
+    const seminar = expectMeetingJob(await store.getById('legacy-seminar'));
+    const rapat = expectMeetingJob(await store.getById('legacy-rapat'));
+
+    assert.equal(seminar.aiContent.kind, 'seminar_blog');
+    assert.equal(seminar.aiContent.status, 'pending');
+    assert.equal(seminar.aiContent.driveFileId, null);
+    assert.equal(rapat.aiContent.kind, 'rapat_meeting_notes');
+    assert.equal(rapat.aiContent.status, 'not_ready');
 });
 
 test('MeetingStore retains active jobs while pruning old terminal records', async () => {

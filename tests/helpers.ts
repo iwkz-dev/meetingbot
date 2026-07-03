@@ -27,6 +27,14 @@ export function buildValidEnv(
             'https://developers.google.com/oauthplayground',
         GDRIVE_FOLDER_RAPAT: 'folder-rapat',
         GDRIVE_FOLDER_SEMINAR: 'folder-seminar',
+        OPENAI_API_KEY: 'openai-secret-key',
+        OPENAI_MODEL: 'gpt-5.4-mini',
+        OPENAI_MAX_OUTPUT_TOKENS: '6000',
+        OPENAI_TIMEOUT_MS: '600000',
+        OPENAI_MAX_RETRIES: '4',
+        OPENAI_FILE_EXPIRY_SECONDS: '86400',
+        OPENAI_DIRECT_MAX_INPUT_TOKENS: '250000',
+        AI_DATE_TIMEZONE: 'Asia/Jakarta',
         ...overrides,
     };
 }

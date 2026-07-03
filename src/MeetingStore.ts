@@ -5,7 +5,9 @@ import {
     MeetingJob,
     MeetingJobCreateInput,
     MeetingJobStatus,
+    MeetingType,
 } from './types';
+import { normalizeAiContentState } from './openai/AiContent';
 
 const MAX_RETAINED_RECORDS = 200;
 const TERMINAL_STATUSES: ReadonlySet<MeetingJobStatus> = new Set([
@@ -35,7 +37,7 @@ export class MeetingStore {
 
     async createJob(input: MeetingJobCreateInput) {
         const now = new Date().toISOString();
-        const job: MeetingJob = {
+        const job = normalizeMeetingJob({
             id: randomUUID(),
             recallBotId: null,
             recallRecordingId: null,
@@ -68,7 +70,7 @@ export class MeetingStore {
             participantArtifactAttempts: 0,
             participantArtifactNextRetryAt: null,
             lastError: null,
-        };
+        });
 
         await this.enqueueWrite(async () => {
             this.jobs.push(job);
@@ -189,9 +191,12 @@ export class MeetingStore {
     }
 }
 
-function normalizeMeetingJob(value: MeetingJob): MeetingJob {
-    return {
-        ...value,
+function normalizeMeetingJob(value: Partial<MeetingJob> & Record<string, unknown>): MeetingJob {
+    const meetingType = normalizeMeetingType(value.meetingType);
+
+    const normalized: MeetingJob = {
+        ...(value as MeetingJob),
+        meetingType,
         onJoinMessage: typeof value.onJoinMessage === 'string' ? value.onJoinMessage : '',
         artifactProcessingMode: value.artifactProcessingMode ?? null,
         driveFolder: value.driveFolder ?? null,
@@ -210,5 +215,19 @@ function normalizeMeetingJob(value: MeetingJob): MeetingJob {
                 : 0,
         participantArtifactNextRetryAt: value.participantArtifactNextRetryAt ?? null,
         lastError: value.lastError ?? null,
+        aiContent: normalizeAiContentState(
+            {
+                meetingType,
+                transcriptTextUpload: value.transcriptTextUpload,
+                participantTextUpload: value.participantTextUpload,
+            },
+            value.aiContent,
+        ),
     };
+
+    return normalized;
+}
+
+function normalizeMeetingType(value: unknown): MeetingType {
+    return value === 'SEMINAR' ? 'SEMINAR' : 'RAPAT';
 }

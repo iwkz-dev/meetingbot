@@ -24,7 +24,9 @@ The app does not join meetings with a local browser anymore. It no longer depend
 - Deterministic artifact filenames.
 - Per-meeting Google Drive folder creation and reuse on retries.
 - Restart-safe upload recovery for interrupted `uploading` jobs.
-- Static-password web control panel.`r`n- Authenticated Meeting History tab that lists direct child folders from both Google Drive meeting roots.
+- Static-password web control panel.
+- Authenticated Meeting History tab that lists direct child folders from both Google Drive meeting roots.
+- OpenAI content-generation foundation for seminar blog prompts and rapat meeting-notes prompts.
 
 ## Final workflow
 
@@ -62,6 +64,8 @@ Artifacts:
 <base>.transcript.txt
 <base>.participants.json
 <base>.participants.txt
+<base>.blog.md
+<base>.meeting-notes.md
 ```
 
 Drive folder name:
@@ -122,6 +126,15 @@ GDRIVE_REFRESH_TOKEN=
 GDRIVE_OAUTH_REDIRECT_URI=https://developers.google.com/oauthplayground
 GDRIVE_FOLDER_RAPAT=
 GDRIVE_FOLDER_SEMINAR=
+
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.4-mini
+OPENAI_MAX_OUTPUT_TOKENS=6000
+OPENAI_TIMEOUT_MS=600000
+OPENAI_MAX_RETRIES=4
+OPENAI_FILE_EXPIRY_SECONDS=86400
+OPENAI_DIRECT_MAX_INPUT_TOKENS=250000
+AI_DATE_TIMEZONE=Asia/Jakarta
 ```
 
 Notes:
@@ -129,8 +142,25 @@ Notes:
 - `PUBLIC_API_BASE_URL` must be a stable public HTTPS backend URL.
 - `RECALL_REGION` must be one of: `us-west-2`, `us-east-1`, `eu-central-1`, `ap-northeast-1`.
 - Do not use `localhost` for `PUBLIC_API_BASE_URL`.
-- Do not commit real Recall or Google credentials.
+- Do not commit real Recall, Google, or OpenAI credentials.
+- `OPENAI_FILE_EXPIRY_SECONDS` must be at least 3600 seconds.
+- `AI_DATE_TIMEZONE` must be a valid IANA timezone name.
 
+## Agent prompts
+
+The OpenAI prompt sources are loaded from disk at runtime from these deployment-controlled files:
+
+- `docs/agent/seminar-blog-id.md`
+- `docs/agent/rapat-meeting-notes-id.md`
+
+Meeting-type mapping:
+
+- `seminar` -> `seminar_blog` -> `.blog.md`
+- `rapat` -> `rapat_meeting_notes` -> `.meeting-notes.md`
+
+Both prompt files must keep the `{{CURRENT_DATE}}` placeholder. The app replaces that value automatically at generation time using `AI_DATE_TIMEZONE`.
+
+This Prompt 1 foundation only adds configuration, prompt loading, and persistent AI state. OpenAI file uploads and content generation are not wired into the artifact pipeline until the next prompt.
 ## Recall.ai setup
 
 1. Choose a single Recall region.
@@ -314,6 +344,7 @@ rg -n "playwright|puppeteer|ffmpeg|xvfb|pulseaudio|HandlerGMeet|HandlerZoom|CHRO
 ```
 
 Those strings should not appear in runtime app code for the Recall-only architecture.
+
 
 
 

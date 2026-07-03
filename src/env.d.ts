@@ -19,5 +19,13 @@ declare namespace NodeJS {
         GDRIVE_OAUTH_REDIRECT_URI?: string;
         GDRIVE_FOLDER_RAPAT?: string;
         GDRIVE_FOLDER_SEMINAR?: string;
+        OPENAI_API_KEY?: string;
+        OPENAI_MODEL?: string;
+        OPENAI_MAX_OUTPUT_TOKENS?: string;
+        OPENAI_TIMEOUT_MS?: string;
+        OPENAI_MAX_RETRIES?: string;
+        OPENAI_FILE_EXPIRY_SECONDS?: string;
+        OPENAI_DIRECT_MAX_INPUT_TOKENS?: string;
+        AI_DATE_TIMEZONE?: string;
     }
 }

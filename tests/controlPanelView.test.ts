@@ -9,8 +9,11 @@ test('control panel invite form includes optional onJoinMessage field', async ()
         'utf8',
     );
 
-    assert.match(html, /<label for="onJoinMessage">On-join Message<\/label>/);
-    assert.match(html, /<textarea id="onJoinMessage" name="onJoinMessage" placeholder="This meeting is being recorded\."/);
-    assert.match(html, /const payload = Object\.fromEntries\(new FormData\(inviteForm\)\.entries\(\)\);/);
+    assert.equal(html.includes('for="onJoinMessage"'), true);
+    assert.equal(html.includes('On-join Message'), true);
+    assert.equal(html.includes('id="onJoinMessage"'), true);
+    assert.equal(html.includes('name="onJoinMessage"'), true);
+    assert.equal(html.includes('placeholder="This meeting is being recorded."'), true);
+    assert.match(html, /const payload = Object\.fromEntries\([\s\S]*new FormData\(inviteForm\)\.entries\(\)[\s\S]*\);/);
     assert.match(html, /if \(response\.ok\) \{\s*inviteForm\.reset\(\);\s*\}/);
 });

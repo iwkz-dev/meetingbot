@@ -17,6 +17,32 @@ export type MeetingJobStatus =
 
 export type ParticipantArtifactStatus = 'pending' | 'processing' | 'done' | 'failed';
 
+export type AiContentKind = 'seminar_blog' | 'rapat_meeting_notes';
+
+export type AiContentStatus =
+    | 'not_ready'
+    | 'pending'
+    | 'processing'
+    | 'done'
+    | 'failed';
+
+export type AiContentArtifactState = {
+    kind: AiContentKind;
+    status: AiContentStatus;
+    generationDateIso: string | null;
+    driveFileId: string | null;
+    outputFilename: string | null;
+    openaiResponseId: string | null;
+    openaiRequestId: string | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    attemptCount: number;
+    lastAttemptAt: string | null;
+    completedAt: string | null;
+    errorCode: string | null;
+    errorMessage: string | null;
+};
+
 export type DriveArtifact = {
     id: string;
     name: string;
@@ -70,6 +96,7 @@ export type MeetingJob = {
     participantArtifactError: string | null;
     participantArtifactAttempts: number;
     participantArtifactNextRetryAt: string | null;
+    aiContent: AiContentArtifactState;
     lastError: string | null;
 };
 
