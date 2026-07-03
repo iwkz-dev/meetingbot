@@ -8,6 +8,7 @@ import { MeetingProcessingService } from './MeetingProcessingService';
 import { MeetingStore } from './MeetingStore';
 import { RecallClient } from './RecallClient';
 import { RecallWebhookService } from './RecallWebhookService';
+import { verifyAgentPromptFilesReadable } from './openai/AgentPromptService';
 
 const config = getConfig();
 let app = express();
@@ -20,6 +21,11 @@ void main().catch((error) => {
 export default app;
 
 async function main() {
+    const promptPaths = await verifyAgentPromptFilesReadable({
+        config: { aiDateTimezone: config.aiDateTimezone },
+    });
+    console.log(`[startup] Agent prompts ready: ${promptPaths.join(', ')}`);
+
     const store = await MeetingStore.create(config.dataDir);
     const recallClient = new RecallClient(config);
     const meetingController = new MeetingController(store, recallClient, config);
@@ -48,6 +54,7 @@ async function main() {
         config,
         store,
         meetingController,
+        meetingProcessingService,
         recallWebhookService,
         loadControlPanelHistory: () => listControlPanelHistory(config),
     });

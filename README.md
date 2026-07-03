@@ -1,54 +1,39 @@
-# IWKZ MeetingBot - Recall.ai Edition
+# IWKZ MeetingBot - Edisi Recall.ai
 
-IWKZ MeetingBot is a TypeScript/Express app that creates a Recall.ai bot for a Google Meet or Zoom meeting, tracks the bot lifecycle through verified webhooks, downloads the final MP4, transcript, and participant artifacts after the call, and uploads those artifacts into a per-meeting Google Drive folder.
+IWKZ MeetingBot adalah aplikasi TypeScript/Express yang membuat bot Recall.ai untuk meeting Google Meet atau Zoom, melacak lifecycle bot melalui webhook terverifikasi, mengunggah artefak hasil meeting ke Google Drive, dan menghasilkan artefak konten AI dengan OpenAI setelah file sumber siap.
 
-The app does not join meetings with a local browser anymore. It no longer depends on Playwright, Puppeteer, Xvfb, PulseAudio, FFmpeg, `HandlerGMeet`, `HandlerZoom`, or `CHROME_PATH`.
+## Fitur
 
-## What changed
+- Alur undang bot Recall.ai untuk URL Google Meet dan Zoom.
+- Penyimpanan job meeting persisten di bawah `DATA_DIR`.
+- Endpoint webhook Recall terverifikasi di `/api/recall/webhook`.
+- Pipeline artefak Recall recording -> transcript -> participants -> Google Drive.
+- Satu subfolder Google Drive per meeting, dipakai ulang saat retry dan recovery.
+- Generasi konten OpenAI untuk blog seminar dan notulen rapat.
+- Recovery artefak upload dan AI yang aman saat restart.
+- Control panel terlindungi dengan status meeting live, Meeting History, dan manual leave.
+- Endpoint backend retry AI terlindungi untuk job gagal atau queued saat output masih belum ada.
 
-| Previous browser bot | Current Recall.ai flow |
-| --- | --- |
-| Local Chromium joined the meeting | Recall.ai bot joins the meeting |
-| X11/PulseAudio/FFmpeg captured media | Recall.ai produces the mixed MP4 |
-| UI selectors decided join state | Verified Recall webhooks update lifecycle state |
-| Recording existed only on local temp disk | Meeting jobs and upload state are persisted under `DATA_DIR` |
-| Transcript/audio processing was local-browser driven | Post-meeting transcript processing is webhook driven |
-
-## Features
-
-- Recall.ai bot invite for Google Meet and Zoom URLs.
-- Persistent meeting job store under `DATA_DIR`.
-- Verified Recall webhook endpoint at `/api/recall/webhook`.
-- Manual leave action from the control panel.
-- Recall recording -> transcript/participant artifacts -> Google Drive processing pipeline.
-- Deterministic artifact filenames.
-- Per-meeting Google Drive folder creation and reuse on retries.
-- Restart-safe upload recovery for interrupted `uploading` jobs.
-- Static-password web control panel.
-- Authenticated Meeting History tab that lists direct child folders from both Google Drive meeting roots.
-- OpenAI content-generation foundation for seminar blog prompts and rapat meeting-notes prompts.
-
-## Final workflow
+## Alur Kerja
 
 ```text
-User submits meeting
-  -> app persists internal meeting job
-  -> app creates Recall bot
-  -> Recall bot joins and records
-  -> bot.* webhooks update dashboard state
-  -> host ends meeting / Recall automatic leave / user clicks Leave
-  -> recording.done webhook
-  -> app creates Recall async transcript
-  -> transcript.done webhook
-  -> app fetches fresh signed MP4/transcript URLs from Recall
-  -> app streams MP4 to temp disk
-  -> app writes raw transcript JSON and readable transcript TXT
-  -> app creates or reuses one meeting folder in Google Drive
-  -> app uploads MP4, transcript JSON, transcript TXT into that folder
-  -> app persists Drive links and marks the meeting complete
+User submit meeting
+  -> aplikasi menyimpan job meeting
+  -> aplikasi membuat bot Recall
+  -> bot Recall join dan merekam
+  -> webhook Recall terverifikasi memperbarui state
+  -> artefak recording/transcript/participant siap
+  -> aplikasi membuat atau memakai ulang satu folder meeting di Google Drive
+  -> aplikasi mengunggah MP4, transcript JSON, transcript TXT, participants JSON, participants TXT
+  -> seminar: transcript TXT
+     rapat: transcript TXT + participants TXT
+  -> upload file sementara OpenAI Files API dengan purpose user_data
+  -> Responses API + prompt dari docs/agent
+  -> output Markdown diunggah ke folder Google Drive meeting yang sama
+  -> file sementara OpenAI dihapus
 ```
 
-## Output naming
+## Penamaan Output
 
 Base name:
 
@@ -56,7 +41,7 @@ Base name:
 YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>
 ```
 
-Artifacts:
+Artefak:
 
 ```text
 <base>.mp4
@@ -68,40 +53,22 @@ Artifacts:
 <base>.meeting-notes.md
 ```
 
-Drive folder name:
+Nama folder Drive:
 
 ```text
 <sanitized-meeting-subject>_<YYYY-MM-DD>
 ```
 
-Example:
-
-```text
-HelloWorld_2026-07-02
-```
-
-## Google Drive routing
-
-The parent folder depends on the meeting type:
+## Routing Google Drive
 
 - `RAPAT` -> `GDRIVE_FOLDER_RAPAT`
 - `SEMINAR` -> `GDRIVE_FOLDER_SEMINAR`
 
-For every processed meeting, the app creates one subfolder inside that parent folder using the meeting subject plus meeting date. All uploaded artifacts for that meeting go into that same subfolder.
+Semua artefak untuk satu meeting tetap berada di subfolder meeting yang sama di Google Drive. Aplikasi tidak pernah membuat nested folder kedua untuk output AI.
 
-Example:
+## Variabel Environment yang Diperlukan
 
-1. Meeting subject: `HelloWorld`
-2. Meeting type: `SEMINAR`
-3. Parent folder: `GDRIVE_FOLDER_SEMINAR`
-4. Created subfolder: `HelloWorld_2026-07-02`
-5. Uploaded files: MP4, transcript JSON, transcript TXT, participants JSON, participants TXT
-
-No audio-only file is generated or uploaded.
-
-## Required environment variables
-
-Copy `.env.example` to `.env` and fill these values:
+Salin `.env.example` ke `.env` lalu isi nilai berikut:
 
 ```env
 PORT=3010
@@ -137,42 +104,88 @@ OPENAI_DIRECT_MAX_INPUT_TOKENS=250000
 AI_DATE_TIMEZONE=Asia/Jakarta
 ```
 
-Notes:
+Catatan:
 
-- `PUBLIC_API_BASE_URL` must be a stable public HTTPS backend URL.
-- `RECALL_REGION` must be one of: `us-west-2`, `us-east-1`, `eu-central-1`, `ap-northeast-1`.
-- Do not use `localhost` for `PUBLIC_API_BASE_URL`.
-- Do not commit real Recall, Google, or OpenAI credentials.
-- `OPENAI_FILE_EXPIRY_SECONDS` must be at least 3600 seconds.
-- `AI_DATE_TIMEZONE` must be a valid IANA timezone name.
+- `OPENAI_API_KEY` wajib ada dan divalidasi saat startup.
+- `OPENAI_MODEL` default ke `gpt-5.4-mini`.
+- `OPENAI_FILE_EXPIRY_SECONDS` minimal `3600`.
+- `AI_DATE_TIMEZONE` harus berupa IANA timezone yang valid.
+- Aplikasi mencatat model OpenAI, timeout, retry count, dan timezone, tetapi tidak pernah mencatat API key.
+- `PUBLIC_API_BASE_URL` harus berupa URL backend HTTPS publik yang stabil.
 
-## Agent prompts
+## Agent Prompt
 
-The OpenAI prompt sources are loaded from disk at runtime from these deployment-controlled files:
+Instruksi OpenAI dimuat saat runtime dari file yang dikontrol deployment berikut:
 
 - `docs/agent/seminar-blog-id.md`
 - `docs/agent/rapat-meeting-notes-id.md`
 
-Meeting-type mapping:
+Mapping jenis meeting:
 
 - `seminar` -> `seminar_blog` -> `.blog.md`
 - `rapat` -> `rapat_meeting_notes` -> `.meeting-notes.md`
 
-Both prompt files must keep the `{{CURRENT_DATE}}` placeholder. The app replaces that value automatically at generation time using `AI_DATE_TIMEZONE`.
+Aturan kustomisasi prompt:
 
-This Prompt 1 foundation only adds configuration, prompt loading, and persistent AI state. OpenAI file uploads and content generation are not wired into the artifact pipeline until the next prompt.
-## Recall.ai setup
+- Edit hanya file di bawah `docs/agent`.
+- Pertahankan placeholder `{{CURRENT_DATE}}`.
+- Restart aplikasi setelah prompt diubah karena source prompt di-cache di memori.
+- Prompt dikontrol oleh deployment dan tidak bisa diedit user dari control panel.
 
-1. Choose a single Recall region.
-2. Create the Recall API key and workspace verification secret in that same region.
-3. Set `PUBLIC_API_BASE_URL` to your stable public HTTPS backend.
-4. In the Recall dashboard, create a webhook pointing to:
+## Perilaku Generasi OpenAI
 
-```text
-https://your-domain.example/api/recall/webhook
-```
+- Input seminar: `.transcript.txt`
+- Input rapat: `.transcript.txt` dan `.participants.txt`
+- File transcript dan participant dikirim sebagai `input_file` OpenAI, bukan inline text.
+- Transcript JSON mentah dan participant JSON tidak pernah dikirim ke OpenAI.
+- Response menggunakan `store: false`.
+- Tools dinonaktifkan.
+- Token count dicek sebelum generation.
+- Total ukuran gabungan input file OpenAI dibatasi 48 MiB.
+- Job di atas `OPENAI_DIRECT_MAX_INPUT_TOKENS` akan gagal secara eksplisit dengan `OPENAI_INPUT_CONTEXT_TOO_LARGE`.
+- Versi ini belum mengimplementasikan hierarchical chunking. Job yang terlalu besar akan gagal, bukan dipotong diam-diam.
 
-5. Subscribe the webhook to:
+## Retry dan Recovery
+
+Kebijakan retry AI tingkat aplikasi:
+
+- Maksimum percobaan: `5`
+- Delay: `1 menit`, `5 menit`, `15 menit`, `1 jam`, `6 jam`
+- Hanya error operasional yang retryable yang akan dicoba ulang otomatis.
+- Error non-retryable seperti auth, permission, prompt/config, input terlalu besar, context terlalu besar, dan transcript kosong akan tetap gagal sampai ada perubahan.
+
+Recovery saat startup:
+
+- Memuat ulang job meeting persisten dari `DATA_DIR`.
+- Menjalankan ulang job `uploading` yang terputus dan masih punya artefak yang kurang.
+- Mengevaluasi ulang job AI `processing` yang stale setelah 30 menit.
+- Membersihkan OpenAI file ID sementara yang tersimpan jika memungkinkan.
+- Mengecek apakah output Drive yang diharapkan sudah ada sebelum generate ulang.
+
+Manual retry:
+
+- Endpoint terlindungi: `POST /api/control-panel/meetings/:meetingId/retry-ai`
+- Mengecek ulang output Drive dan kesiapan source file.
+- Mengantrekan processing secara asynchronous dan mengembalikan `202`.
+- Mempertahankan `generationDateIso`.
+- Membatasi klik berulang per meeting di backend.
+
+## Privasi dan Retensi
+
+- Transcript TXT dan participants TXT diunggah sementara ke OpenAI sebagai file `user_data`.
+- Response menggunakan `store: false`.
+- File sementara OpenAI dihapus setelah processing bila memungkinkan.
+- Expiration file OpenAI tetap dipakai sebagai fallback keamanan.
+- Google Drive tetap menjadi penyimpanan artefak yang durable.
+- Aplikasi tidak pernah menyimpan API key, isi prompt penuh, isi transcript, isi participant, atau Markdown hasil generation ke payload API control panel.
+
+## Setup Recall.ai
+
+1. Pilih satu region Recall.
+2. Buat Recall API key dan workspace verification secret di region tersebut.
+3. Set `PUBLIC_API_BASE_URL` ke backend HTTPS publik yang stabil.
+4. Buat webhook ke `https://your-domain.example/api/recall/webhook`.
+5. Subscribe webhook ke:
 
 ```text
 bot.*
@@ -182,11 +195,7 @@ transcript.done
 transcript.failed
 ```
 
-6. For older Recall dashboard accounts created before `2025-12-15`, populate `RECALL_SVIX_WEBHOOK_SECRET` only if your Recall account still uses the legacy endpoint-secret flow.
-
-## Local development
-
-Install and run:
+## Development Lokal
 
 ```bash
 pnpm install
@@ -194,158 +203,65 @@ cp .env.example .env
 pnpm start
 ```
 
-Open:
-
-```text
-http://localhost:3010/control-panel
-```
-
-Recall still needs a public HTTPS callback URL during local development. Use a stable tunnel such as a static ngrok URL that forwards to your backend.
+Buka `http://localhost:3010/control-panel`.
 
 ## Docker
 
-Build and run:
-
 ```bash
 docker compose up -d --build
-```
-
-Rebuild with the helper script:
-
-```bash
 pnpm docker:rebuild
-```
-
-Inspect runtime state:
-
-```bash
 docker compose ps
 docker compose logs -f meetingbot
 ```
 
-Validate the compose file:
+Image runtime harus memuat file prompt `docs/agent`. Secret tetap harus di-inject saat runtime melalui `.env` atau environment container.
 
-```bash
-docker compose config
-```
+## Cara Pakai Control Panel
 
-The current Recall build does not require browser or media-capture runtime dependencies.
+1. Buka `/control-panel`.
+2. Login jika `CONTROL_PANEL_PASSWORD` dikonfigurasi.
+3. Undang bot meeting.
+4. Pantau status live meeting dan penyelesaian artefak.
+5. Gunakan **Leave Meeting** untuk menghentikan bot yang sedang aktif.
+6. Gunakan endpoint retry yang terlindungi atau alur UI pendukung untuk mengantrekan ulang generasi AI saat job gagal atau queued dan output masih belum ada.
+7. Buka link Drive yang sudah terunggah setelah processing selesai.
 
-## Control panel usage
+## Endpoint API
 
-1. Open `/control-panel`.
-2. Log in if `CONTROL_PANEL_PASSWORD` is configured.
-3. Submit:
-   - Meeting URL
-   - Meeting Subject
-   - Bot Name
-   - Meeting Type (`seminar` or `rapat`)
-   - Optional On-join Message (`empty` means no automatic join message)
-4. Wait for the Recall bot lifecycle to update.
-5. Use **Leave Meeting** if you need to stop a live bot.
-6. Open the uploaded Drive links after processing completes.
-
-## API endpoints
-
-### Invite bot
-
-`POST /invite-bot`
-
-Request body:
-
-```json
-{
-  "meetingUrl": "https://meet.google.com/abc-defg-hij",
-  "meetingSubject": "Weekly Sync",
-  "botDisplayName": "IWKZ Bot",
-  "meetingType": "seminar",
-  "onJoinMessage": "This meeting is being recorded."
-}
-```
-
-Legacy clients may still send `meetingTitle`; the app treats it as a fallback alias for `meetingSubject`.
-
-### Manual leave
-
-`POST /api/control-panel/meetings/:meetingId/leave`
-
-Alias kept for compatibility:
-
-`POST /api/control-panel/sessions/:meetingId/stop`
-
-### Health
-
-`GET /health`
-
-Example response:
-
-```json
-{
-  "status": "ok",
-  "uptimeSeconds": 123,
-  "recallRegion": "eu-central-1",
-  "storeLoaded": true,
-  "activeMeetings": 0,
-  "pendingArtifactJobs": 0
-}
-```
-
-The health endpoint does not call Recall or Google Drive.
-
-## Startup recovery
-
-On startup the app:
-
-- reloads persisted meeting jobs from `DATA_DIR`;
-- requeues interrupted `uploading` jobs that still have missing artifacts;
-- leaves `joining`, `waiting_room`, `recording`, `leaving`, and `transcribing` jobs untouched until later webhooks arrive;
-- never creates a second Recall bot automatically.
+- `POST /invite-bot`
+- `POST /api/control-panel/invite`
+- `POST /api/control-panel/meetings/:meetingId/leave`
+- `POST /api/control-panel/meetings/:meetingId/retry-ai`
+- `POST /api/control-panel/sessions/:meetingId/stop`
+- `GET /api/control-panel/state`
+- `GET /api/control-panel/history`
+- `GET /health`
 
 ## Troubleshooting
 
-### Invalid webhook signature
+### Output AI tidak muncul
 
-- Confirm `RECALL_WORKSPACE_VERIFICATION_SECRET` matches the Recall workspace in the selected region.
-- If you use an older Recall account, verify whether `RECALL_SVIX_WEBHOOK_SECRET` is still required.
-- Make sure your reverse proxy does not rewrite the raw webhook body.
+- Cek `aiContent.status`, `errorCode`, dan `errorMessage` di protected control-panel state.
+- Pastikan transcript TXT ada untuk job seminar.
+- Pastikan transcript TXT dan participants TXT ada untuk job rapat.
+- Pastikan folder meeting ada dan bisa ditulisi.
 
-### Recall `403`
+### Retry AI berhenti
 
-- Check that the API key belongs to the same Recall region as `RECALL_REGION`.
-- Confirm the Recall workspace allows the requested operation.
+- Kegagalan retryable akan berhenti otomatis setelah lima percobaan level job.
+- Kegagalan non-retryable memerlukan perubahan input, prompt, model, atau konfigurasi.
+- Jika output Drive ternyata sudah ada, aplikasi akan menandai artefak AI sebagai `done`, bukan generate ulang.
 
-### Recall `429`
+### Upload Google Drive hilang
 
-- Recall rate limiting is retried automatically.
-- Reduce burst traffic or retry later if throttling persists.
+- Pastikan `GDRIVE_FOLDER_RAPAT` dan `GDRIVE_FOLDER_SEMINAR` bisa ditulisi.
+- Pastikan refresh token milik user Drive yang punya izin create.
+- Cek `lastError` dan state `aiContent` yang aman pada control panel.
 
-### Recall `507`
-
-- Recall storage/capacity errors are retried automatically.
-- If they continue, retry later and inspect Recall account limits.
-
-### Missing Google Drive uploads
-
-- Verify `GDRIVE_FOLDER_RAPAT` and `GDRIVE_FOLDER_SEMINAR` point to writable parent folders.
-- Confirm the OAuth refresh token belongs to a Drive user with create permission in those folders.
-- Check meeting status and `lastError` in the control panel.
-
-### Transcript failure
-
-- If Recall transcript creation or transcript download fails, the app still tries to upload the video when possible.
-- Those meetings end as `completed_with_errors`.
-
-## Repository checks
-
-Useful searches during maintenance:
+## Perintah Verifikasi
 
 ```bash
-rg -n "playwright|puppeteer|ffmpeg|xvfb|pulseaudio|HandlerGMeet|HandlerZoom|CHROME_PATH" .
+pnpm typecheck
+pnpm test
+pnpm build
 ```
-
-Those strings should not appear in runtime app code for the Recall-only architecture.
-
-
-
-
-

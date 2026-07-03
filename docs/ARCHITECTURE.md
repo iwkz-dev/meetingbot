@@ -1,53 +1,51 @@
 # MeetingBot Recall.ai Architecture
 
-> Target architecture for the MeetingBot rebuild. Recall.ai replaces the local Playwright/Puppeteer/FFmpeg meeting engine while the existing TypeScript/Express web application and Google Drive workflow remain.
+> Target architecture untuk rebuild MeetingBot. Recall.ai menggantikan engine meeting lokal berbasis Playwright/Puppeteer/FFmpeg, sementara aplikasi web TypeScript/Express, workflow Google Drive, dan pipeline OpenAI tetap berjalan di satu backend.
 
-## 1. Architecture goals
+## 1. Tujuan arsitektur
 
-The rebuilt application must:
+Aplikasi hasil rebuild harus:
 
-- let an operator submit a meeting URL, bot name, meeting subject, meeting type, and an optional per-meeting on-join message;
-- use Recall.ai to join and record Google Meet or Zoom meetings;
-- track the complete bot lifecycle through verified webhooks;
-- support automatic leaving and manual leave from the control panel;
-- create a post-meeting transcript with Recall.ai;
-- upload the mixed MP4 recording, two transcript formats, and two participant artifacts to Google Drive;
-- route files according to `RAPAT` or `SEMINAR`;
-- preserve job state across process or container restarts;
-- remain idempotent when Recall retries webhook delivery;
-- avoid polling Recall.ai.
+- memungkinkan operator mengirim URL meeting, nama bot, subject meeting, tipe meeting, dan pesan on-join opsional per meeting;
+- memakai Recall.ai untuk join dan merekam Google Meet atau Zoom;
+- melacak seluruh lifecycle bot melalui webhook terverifikasi;
+- mendukung automatic leave dan manual leave dari control panel;
+- membuat transcript pasca-meeting dengan Recall.ai;
+- mengunggah mixed MP4 recording, dua format transcript, dan dua artefak participant ke Google Drive;
+- merutekan file berdasarkan `RAPAT` atau `SEMINAR`;
+- menjaga state job tetap persisten saat proses atau container restart;
+- tetap idempotent saat Recall mengirim ulang webhook;
+- menghindari polling ke Recall.ai;
+- menghasilkan blog seminar atau notulen rapat melalui OpenAI setelah source file siap.
 
-## 2. Non-goals for this rebuild
+## 2. Non-goal
 
-This application does **not**:
+Aplikasi ini **tidak**:
 
-- automate a local Chrome browser;
-- run Xvfb, PulseAudio, Fluxbox, or FFmpeg;
-- generate meeting notes or blog articles itself;
-- provide real-time transcription or live captions;
-- add a relational database or distributed message broker;
-- store Recall signed media URLs permanently.
+- mengotomasi browser Chrome lokal;
+- menjalankan Xvfb, PulseAudio, Fluxbox, atau FFmpeg;
+- memberi live caption atau transkripsi real-time;
+- menambahkan relational database atau distributed message broker;
+- menyimpan signed media URL Recall secara permanen;
+- memotong transcript besar diam-diam dengan hierarchical chunking.
 
-A separate downstream AI agent consumes transcript files from Google Drive and generates either meeting notes or website/blog content.
-
-## 3. System context
+## 3. Konteks sistem
 
 ```mermaid
 flowchart LR
-    U[Operator] -->|Open control panel| W[MeetingBot Web App]
-    U -->|Submit meeting details| W
+    U[Operator] -->|Buka control panel| W[MeetingBot Web App]
+    U -->|Submit detail meeting| W
 
-    W -->|Create bot / leave call / retrieve artifacts| R[Recall.ai API]
-    R -->|Bot joins and records| M[Google Meet / Zoom]
-    R -->|Verified lifecycle webhooks| W
+    W -->|Create bot / leave call / ambil artefak| R[Recall.ai API]
+    R -->|Bot join dan record| M[Google Meet / Zoom]
+    R -->|Webhook lifecycle terverifikasi| W
 
     W -->|Persist job state| S[(Atomic JSON Meeting Store)]
-    W -->|Upload MP4 + transcript + participant files| G[Google Drive Workspace]
-    G -->|Transcript input| A[Downstream AI Agent]
-    A -->|Meeting notes or blog content| O[Organization Output]
+    W -->|Upload MP4 + transcript + participant + output AI| G[Google Drive Workspace]
+    W -->|Upload source TXT + generate konten| O[OpenAI API]
 ```
 
-## 4. High-level component design
+## 4. Desain komponen tingkat tinggi
 
 ```mermaid
 flowchart TB
@@ -61,11 +59,13 @@ flowchart TB
         RC[Recall Client]
         WH[Recall Webhook Handler]
         WP[Webhook Processor]
-        AP[Artifact Processor]
+        AP[Meeting Processing Service]
         TF[Transcript Formatter]
         GD[Google Drive Uploader]
         MS[Meeting Store]
         CFG[Typed Configuration]
+        OAI[OpenAI Content Generation Service]
+        APS[Agent Prompt Service]
     end
 
     CP --> HTTP
@@ -81,36 +81,42 @@ flowchart TB
     AP --> RC
     AP --> TF
     AP --> GD
+    AP --> OAI
     AP --> MS
+
+    OAI --> APS
+    OAI --> GD
 
     CFG --> HTTP
     CFG --> RC
     CFG --> GD
     CFG --> MS
+    CFG --> OAI
 
     RC <--> Recall[Recall.ai]
     GD <--> Drive[Google Drive]
+    OAI <--> OpenAI[OpenAI Files + Responses API]
     MS <--> JSON[(DATA_DIR/meetings.json)]
 ```
 
-### Main components
+### Komponen utama
 
-| Component | Responsibility |
+| Komponen | Tanggung jawab |
 |---|---|
-| `config.ts` | Validate environment variables, expose typed configuration, print only safe startup information. |
-| `MeetingController.ts` | Validate user input, create persistent jobs, call Recall, and return API responses. |
-| `RecallClient.ts` | Own every Recall REST call and retry behavior for `429`, `503`, and `507`. |
-| `RecallWebhookHandler.ts` | Receive raw webhook bodies, verify signatures, reject untrusted requests, and acknowledge valid requests quickly. |
-| `WebhookProcessor.ts` | Process verified bot, recording, and transcript events asynchronously and idempotently. |
-| `MeetingStore.ts` | Persist meeting jobs atomically using temp-file plus rename and serialize writes through one queue. |
-| `ArtifactProcessor.ts` | Retrieve fresh signed URLs, stream video to disk, download transcript JSON, upload artifacts, and resume partial jobs. |
-| `TranscriptFormatter.ts` | Convert Recall transcript JSON into readable speaker-grouped text without summarizing or translating. |
-| `GDriveUploader.ts` | Upload exact filenames with the correct MIME type to the configured Drive folder. |
-| Control panel | Create bots, show live status, browse Google Drive meeting history, and request manual leave. |
+| `config.ts` | Validasi environment variable, expose typed configuration, dan hanya mencetak info startup yang aman. |
+| `MeetingController.ts` | Validasi input user, membuat job persisten, memanggil Recall, dan mengembalikan response API. |
+| `RecallClient.ts` | Menangani seluruh REST call Recall dan retry untuk `429`, `503`, dan `507`. |
+| `RecallWebhookService.ts` | Menerima raw webhook body, memverifikasi signature, menolak request tidak terpercaya, dan mengakui request valid secepat mungkin. |
+| `MeetingStore.ts` | Menyimpan meeting job secara atomik dengan temp-file plus rename dan write queue tunggal. |
+| `MeetingProcessingService.ts` | Mengambil signed URL baru, mengunduh artefak, upload ke Drive, menjalankan recovery, dan memutuskan kapan AI generation siap dijalankan. |
+| `AgentPromptService.ts` | Memuat prompt dari `docs/agent`, cache source prompt, dan me-render `{{CURRENT_DATE}}`. |
+| `OpenAIContentGenerationService.ts` | Menyiapkan source file, upload file sementara OpenAI, hitung token, generate Markdown, upload output ke Drive, dan cleanup file sementara. |
+| `GDriveUploader.ts` | Mengunggah exact filename dengan MIME type yang benar ke folder Drive yang dikonfigurasi. |
+| Control panel | Membuat bot, menampilkan status live, melihat Meeting History Google Drive, dan meminta manual leave. |
 
-## 5. Primary workflow
+## 5. Workflow utama
 
-### 5.1 Create and run a bot
+### 5.1 Membuat dan menjalankan bot
 
 ```mermaid
 sequenceDiagram
@@ -121,22 +127,20 @@ sequenceDiagram
     participant Recall as Recall.ai
     participant Call as Meet / Zoom
 
-    Operator->>UI: Enter URL, bot name, subject, type, optional on-join message
+    Operator->>UI: Isi URL, nama bot, subject, tipe, pesan on-join opsional
     UI->>App: POST /api/control-panel/invite
-    App->>App: Validate and normalize input
-    App->>Store: Create job (creating_bot)
-    App->>Recall: Create Bot with join_at and automatic_leave
+    App->>App: Validasi dan normalisasi input
+    App->>Store: Buat job (creating_bot)
+    App->>Recall: Create bot dengan join_at dan automatic_leave
     Recall-->>App: Recall bot ID
-    App->>Store: Save recallBotId and status
+    App->>Store: Simpan recallBotId dan status
     App-->>UI: 202 Accepted + internal job ID
-    Recall->>Call: Join and record meeting
-    Recall-->>App: bot.* webhooks
+    Recall->>Call: Join dan rekam meeting
+    Recall-->>App: bot.* webhook
     App->>Store: Update lifecycle state
 ```
 
-The application always passes a `join_at` value to the bot scheduling abstraction, even when the requested join time is immediate.
-
-### 5.2 Meeting completion, transcription, and upload
+### 5.2 Selesai meeting, transcript, upload, dan AI generation
 
 ```mermaid
 sequenceDiagram
@@ -145,30 +149,32 @@ sequenceDiagram
     participant Worker as Background Processor
     participant Store as Meeting Store
     participant Drive as Google Drive
+    participant OpenAI as OpenAI API
 
     Recall->>WH: recording.done
-    WH->>WH: Verify signature using exact raw body
-    WH-->>Recall: 2xx immediately
+    WH->>WH: Verifikasi signature dari raw body
+    WH-->>Recall: 2xx segera
     WH->>Worker: Dispatch verified event
-    Worker->>Store: Save recording ID, mark recording_processing
+    Worker->>Store: Simpan recording ID, mark recording_processing
     Worker->>Recall: Create async transcript
     Worker->>Store: Mark transcribing
 
     Recall->>WH: transcript.done
-    WH->>WH: Verify signature
-    WH-->>Recall: 2xx immediately
+    WH->>WH: Verifikasi signature
+    WH-->>Recall: 2xx segera
     WH->>Worker: Dispatch verified event
-    Worker->>Store: Save transcript ID, mark uploading
-    Worker->>Recall: Retrieve fresh recording/transcript metadata
-    Worker->>Recall: Download MP4 and transcript JSON via signed URLs
-    Worker->>Worker: Build readable transcript TXT
-    Worker->>Drive: Upload MP4
-    Worker->>Store: Persist video Drive artifact
-    Worker->>Drive: Upload transcript JSON
-    Worker->>Store: Persist JSON Drive artifact
-    Worker->>Drive: Upload transcript TXT
-    Worker->>Store: Persist TXT Drive artifact
-    Worker->>Store: Mark completed
+    Worker->>Store: Simpan transcript ID, mark uploading
+    Worker->>Recall: Ambil metadata recording/transcript baru
+    Worker->>Recall: Unduh MP4 dan transcript JSON via signed URL
+    Worker->>Worker: Bangun transcript TXT yang readable
+    Worker->>Drive: Upload MP4, transcript JSON, transcript TXT, participants JSON, participants TXT
+    Worker->>Store: Persist artefak Drive satu per satu
+    Worker->>Worker: Evaluasi readiness AI
+    Worker->>OpenAI: Upload source TXT sebagai input_file
+    Worker->>OpenAI: Count input tokens
+    Worker->>OpenAI: Generate Markdown via Responses API
+    Worker->>Drive: Upload <meeting>.blog.md atau <meeting>.meeting-notes.md
+    Worker->>Store: Persist AI artifact state dan mark done
 ```
 
 ### 5.3 Manual leave
@@ -181,73 +187,96 @@ sequenceDiagram
     participant Store as Meeting Store
     participant Recall as Recall.ai
 
-    Operator->>UI: Click Leave Meeting
+    Operator->>UI: Klik Leave Meeting
     UI->>App: POST /api/control-panel/meetings/:id/leave
-    App->>Store: Find meeting and Recall bot ID
-    App->>Store: Mark leaving and stopRequestedAt
+    App->>Store: Cari meeting dan Recall bot ID
+    App->>Store: Mark leaving dan stopRequestedAt
     App->>Recall: POST /bot/{id}/leave_call/
     Recall-->>App: Accepted
     App-->>UI: 202 Accepted
-    Recall-->>App: Subsequent bot/recording webhooks
+    Recall-->>App: Webhook bot/recording berikutnya
 ```
 
-Manual leave only asks Recall to remove the bot. Recording finalization, transcription, and uploads still continue through webhooks.
+### 5.4 Manual retry AI
 
-## 6. Job state model
+```mermaid
+sequenceDiagram
+    actor Operator
+    participant UI as Control Panel / Client
+    participant App as MeetingBot API
+    participant Store as Meeting Store
+    participant Worker as MeetingProcessingService
 
-Recommended normalized statuses:
+    Operator->>UI: Trigger retry AI
+    UI->>App: POST /api/control-panel/meetings/:meetingId/retry-ai
+    App->>Worker: Validasi source readiness + output Drive
+    Worker->>Store: Reset scheduling/error fields AI
+    App-->>UI: 202 Accepted
+    Worker->>Worker: Queue processCompletedMeeting secara async
+```
+
+## 6. Model state job
+
+Status utama:
 
 ```text
 creating_bot
-  → joining
-  → waiting_room
-  → in_call_not_recording
-  → recording
-  → leaving                 (manual leave only)
-  → call_ended
-  → recording_processing
-  → transcribing
-  → uploading
-  → completed
+  -> joining
+  -> waiting_room
+  -> in_call_not_recording
+  -> recording
+  -> leaving
+  -> call_ended
+  -> recording_processing
+  -> transcribing
+  -> uploading
+  -> completed
 ```
 
-Failure branches:
+Cabang failure:
 
 ```text
-any active state → failed
-uploading → completed_with_errors
+any active state -> failed
+uploading -> completed_with_errors
 ```
 
-Recall status codes and subcodes must be stored as open strings, not closed enums, because Recall may add new values.
+Recall status code dan subcode harus tetap open string, bukan closed enum.
 
-### Core persistent fields
+### AI artifact state
+
+AI state yang persisten melacak:
 
 ```text
-Internal job ID
-Recall bot ID
-Recall recording ID
-Recall transcript ID
-Meeting URL
-Meeting subject
-Bot display name
-Meeting type
-Normalized app status
-Recall code/subcode/message
-Lifecycle timestamps
-Drive artifact IDs, names, links, and participant artifact retry state
-Last error
+kind
+status
+generationDateIso
+driveFileId
+outputFilename
+openaiResponseId
+openaiRequestId
+openaiInputFileIds
+inputTokens
+outputTokens
+attemptCount
+lastAttemptAt
+nextRetryAt
+completedAt
+errorCode
+errorMessage
 ```
 
-## 7. Google Drive output routing
+Payload control panel yang aman hanya mengekspos field operator-safe seperti status, attempt count, timestamp, filename, dan sanitized error.
 
-| Meeting type | Parent folder | Per-meeting subfolder | Uploaded artifacts |
+## 7. Routing output Google Drive
+
+| Meeting type | Parent folder | Subfolder per meeting | Artefak yang diunggah |
 |---|---|---|---|
-| RAPAT | GDRIVE_FOLDER_RAPAT | <sanitized-meeting-subject>_<YYYY-MM-DD> | MP4, transcript JSON, transcript TXT |
-| SEMINAR | GDRIVE_FOLDER_SEMINAR | <sanitized-meeting-subject>_<YYYY-MM-DD> | MP4, transcript JSON, transcript TXT |
+| RAPAT | GDRIVE_FOLDER_RAPAT | <sanitized-meeting-subject>_<YYYY-MM-DD> | MP4, transcript JSON, transcript TXT, participants JSON, participants TXT, meeting notes Markdown |
+| SEMINAR | GDRIVE_FOLDER_SEMINAR | <sanitized-meeting-subject>_<YYYY-MM-DD> | MP4, transcript JSON, transcript TXT, blog Markdown |
 
-All artifacts for a processed meeting are uploaded into the same per-meeting subfolder. No audio-only file is uploaded in the Recall architecture.
+Semua artefak untuk satu meeting masuk ke subfolder meeting yang sama. Tidak ada nested folder tambahan untuk output AI.
 
-### Deterministic filenames
+### Nama file deterministik
 
 ```text
 YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.mp4
@@ -255,110 +284,131 @@ YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.transcript.json
 YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.transcript.txt
 YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.participants.json
 YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.participants.txt
+YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.blog.md
+YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.meeting-notes.md
 ```
 
-The base name must preserve useful Unicode letters and numbers, replace forbidden filesystem characters, normalize repeated whitespace, and be length-limited.
-
-## 8. Artifact formats
-
-### Raw JSON
-
-The `.transcript.json` file is the downloaded Recall transcript payload unchanged. It is intended for machine processing and traceability.
-
-### Readable TXT
-
-The `.transcript.txt` file groups adjacent entries from the same participant and uses this format when timestamps are available:
+## 8. Trust boundary dan source file
 
 ```text
-[00:02:14] Speaker Name: Transcript text...
+Prompt di docs/agent = trusted deployment-controlled instructions
+Transcript TXT / participants TXT = untrusted source material
+Markdown hasil model = output yang disimpan durably di Drive
 ```
 
-Formatting rules:
+Aturan penting:
 
-- preserve the original language;
-- do not translate, summarize, or invent content;
-- use `Unknown Speaker` when participant information is absent;
-- tolerate unknown or missing fields;
-- concatenate word objects into readable spacing.
+- transcript JSON dan participant JSON tidak pernah dikirim ke OpenAI;
+- transcript TXT wajib untuk seminar;
+- transcript TXT + participants TXT wajib untuk rapat;
+- source file disuplai sebagai OpenAI `input_file`, bukan inline instruction text;
+- prompt loader selalu menambahkan instruction keamanan tetap agar model memperlakukan transcript dan participant sebagai data tak terpercaya.
 
-## 9. Webhook trust boundary
+## 9. Lifecycle file OpenAI
 
-The Recall webhook endpoint is a security boundary.
+```text
+Source TXT tersedia
+  -> materialize local working copy
+  -> normalisasi dan validasi ukuran
+  -> upload OpenAI Files API user_data
+  -> persist temporary file IDs
+  -> count input tokens
+  -> call Responses API
+  -> upload Markdown ke folder meeting di Drive
+  -> delete temporary OpenAI files
+```
+
+Aturan:
+
+- total gabungan input file dibatasi 48 MiB;
+- `truncation` dinonaktifkan;
+- `tools` kosong;
+- `store: false`;
+- output kosong atau truncated dianggap gagal;
+- job yang terlalu besar gagal secara eksplisit, tidak dipotong diam-diam.
+
+## 10. Batas kepercayaan webhook
+
+Endpoint webhook Recall adalah security boundary.
 
 ```mermaid
 flowchart LR
-    R[Recall.ai] -->|Headers + raw payload| E["/api/recall/webhook"]
+    R[Recall.ai] -->|Headers + raw payload| E[/api/recall/webhook]
     E --> V{Signature valid?}
-    V -->|No| X[Reject 4xx and do not process]
+    V -->|No| X[Reject 4xx dan jangan proses]
     V -->|Yes| Q[Dispatch event]
-    Q --> A[Return 2xx immediately]
+    Q --> A[Return 2xx segera]
     Q --> P[Async processing]
 ```
 
-Mandatory behavior:
+Perilaku wajib:
 
-- preserve the exact raw request body for signature verification;
-- select the correct secret for the account/webhook type;
-- reject missing or invalid verification headers;
-- never persist or process unverified payloads;
-- acknowledge valid webhook requests before long-running work;
-- expect duplicate deliveries and process them idempotently;
-- never expose API keys or webhook secrets in logs or control-panel JSON.
+- mempertahankan raw body persis untuk verifikasi signature;
+- memilih secret yang benar sesuai jenis webhook;
+- menolak header verifikasi yang hilang atau tidak valid;
+- tidak pernah memproses payload yang tidak terverifikasi;
+- mengakui webhook valid sebelum pekerjaan panjang dimulai;
+- menganggap duplicate delivery sebagai hal normal dan memproses secara idempotent;
+- tidak pernah mengekspos API key atau webhook secret ke log atau JSON control panel.
 
-## 10. Recall API resilience
+## 11. Retry, idempotency, dan recovery
 
-All Recall REST requests go through one client with retry handling:
+### Retry Recall REST
 
-| Status | Behavior |
+| Status | Perilaku |
 |---|---|
-| `429` | Respect `Retry-After`, add jitter, retry. |
-| `503` | Wait, add jitter, retry. |
-| `507` | Bot pool unavailable; wait longer, add jitter, retry. |
-| Other non-2xx | Return a typed error with safe diagnostics. |
+| `429` | Hormati `Retry-After`, tambah jitter, lalu retry. |
+| `503` | Tunggu, tambah jitter, lalu retry. |
+| `507` | Bot pool unavailable; tunggu lebih lama, tambah jitter, lalu retry. |
+| Non-2xx lain | Kembalikan typed error dengan diagnostik yang aman. |
 
-The app must not poll Recall for lifecycle state. Webhooks are the primary source of truth.
+### Retry AI tingkat aplikasi
 
-## 11. Idempotency and recovery
+- maksimum 5 percobaan job;
+- delay: 1 menit, 5 menit, 15 menit, 1 jam, 6 jam;
+- hanya error retryable yang menjadwalkan `nextRetryAt`;
+- error non-retryable tetap failed sampai ada perubahan input atau konfigurasi.
 
 ### Idempotency
 
-- Use the persisted Recall IDs to map all events to one internal job.
-- Creating a transcript must be guarded by `transcriptRequestedAt` or an equivalent lock.
-- Artifact processing must use a per-meeting execution lock.
-- Before each upload, check whether the corresponding Drive artifact ID already exists.
-- Persist each successful upload immediately.
-- Duplicate webhook events must become no-ops once the related action is complete.
+- pakai Recall ID yang persisten untuk memetakan semua event ke satu internal job;
+- pembuatan transcript harus dijaga oleh `transcriptRequestedAt` atau guard setara;
+- processing artefak memakai lock per meeting;
+- sebelum upload, cek apakah Drive artifact ID atau exact filename sudah ada;
+- setiap upload sukses dipersist segera;
+- duplicate webhook harus menjadi no-op setelah aksi terkait selesai.
 
-### Restart recovery
+### Recovery saat restart
 
-On startup:
+Saat startup aplikasi:
 
-1. Load `meetings.json`.
-2. Requeue jobs interrupted during `recording_processing`, `transcribing`, or `uploading` when enough Recall IDs are present.
-3. Do not create another Recall bot automatically.
-4. Retrieve fresh media metadata rather than using expired signed URLs.
-5. Resume only missing Drive uploads.
+1. memuat `meetings.json`;
+2. menjalankan ulang job yang terputus saat `recording_processing`, `transcribing`, atau `uploading` jika Recall ID cukup;
+3. tidak otomatis membuat bot Recall baru;
+4. mengambil ulang metadata media baru, bukan memakai signed URL yang lama;
+5. melanjutkan hanya upload yang belum selesai;
+6. mengecek AI state `processing` yang stale setelah 30 menit;
+7. mencoba menghapus temporary OpenAI file IDs yang masih tersimpan;
+8. mengecek apakah output Markdown yang diharapkan sebenarnya sudah ada di Drive sebelum generate ulang.
 
-## 12. Data persistence
+## 12. Persistensi data
 
-Initial deployment uses:
+Deployment awal menggunakan:
 
 ```text
 DATA_DIR/meetings.json
 ```
 
-Requirements:
+Persyaratan:
 
-- create the directory and file when absent;
-- write to a temporary file and rename atomically;
-- serialize writes through one queue/mutex;
-- never silently remove active jobs;
-- retain at least the newest 200 completed/history records;
-- mount `./data:/app/data` in Docker.
+- membuat directory dan file jika belum ada;
+- menulis ke temporary file lalu rename secara atomik;
+- men-serialize write lewat satu queue/mutex;
+- tidak pernah menghapus active job secara diam-diam;
+- menyimpan minimal 200 history record terbaru;
+- mount `./data:/app/data` di Docker.
 
-This store is suitable for one application instance. A future multi-instance deployment should replace it with a transactional database and a durable queue.
-
-## 13. Deployment design
+## 13. Deployment
 
 ```mermaid
 flowchart TB
@@ -367,85 +417,46 @@ flowchart TB
     App --> Data[(Mounted /app/data)]
     App --> Recall[Recall.ai Region Endpoint]
     App --> Google[Google Drive API]
+    App --> OpenAI[OpenAI API]
 ```
 
-Container characteristics:
+Karakteristik container:
 
-- maintained Node 20 slim base image;
+- base image Node 20 slim yang ter-maintain;
 - pnpm via Corepack;
-- non-root runtime user;
-- no Chrome, Playwright, Puppeteer, X11, FFmpeg, PulseAudio, or Fluxbox;
-- health endpoint at `/health`;
-- persistent `./data:/app/data` volume;
-- stable public HTTPS URL for Recall webhook delivery.
+- runtime user non-root;
+- tidak ada Chrome, Playwright, Puppeteer, X11, FFmpeg, PulseAudio, atau Fluxbox;
+- health endpoint di `/health`;
+- volume persisten `./data:/app/data`;
+- URL HTTPS publik yang stabil untuk webhook Recall;
+- prompt `docs/agent` ikut dibawa ke image runtime.
 
-## 14. Target source layout
+## 14. Failure handling matrix
 
-```text
-meetingbot/
-├── data/
-│   └── meetings.json
-├── scripts/
-│   └── docker-rebuild.sh
-├── src/
-│   ├── views/
-│   │   ├── control-panel-login.html
-│   │   └── control-panel.html
-│   ├── config.ts
-│   ├── env.d.ts
-│   ├── index.ts
-│   ├── types.ts
-│   ├── MeetingController.ts
-│   ├── MeetingStore.ts
-│   ├── RecallClient.ts
-│   ├── RecallWebhookHandler.ts
-│   ├── WebhookProcessor.ts
-│   ├── ArtifactProcessor.ts
-│   ├── TranscriptFormatter.ts
-│   └── GDriveUploader.ts
-├── tests/
-├── .env.example
-├── docker-compose.yml
-├── Dockerfile
-├── package.json
-├── pnpm-lock.yaml
-├── pnpm-workspace.yaml
-├── README.md
-└── tsconfig.json
-```
-
-Exact module names can vary, but responsibility boundaries should remain clear.
-
-## 15. Failure handling matrix
-
-| Failure | Expected behavior |
+| Kegagalan | Perilaku yang diharapkan |
 |---|---|
-| Recall bot creation fails | Persist `failed`, expose safe error in control panel. |
-| Bot rejected or fatal | Persist Recall code/subcode and mark `failed`. |
-| Waiting-room timeout | Let Recall end the bot; reflect webhook result. |
-| Recording fails | Mark `failed`; do not request transcript. |
-| Transcript creation request fails transiently | Retry through `RecallClient`. |
-| Transcript permanently fails | Continue with video-only upload and mark `completed_with_errors`. |
-| MP4 download fails | Persist error and allow startup/event retry. |
-| One Drive upload fails | Preserve successful artifacts; retry only the missing artifact. |
-| Duplicate webhook | Return `2xx`; idempotent processing creates no duplicates. |
-| Invalid webhook signature | Return `4xx`; do not store or process payload. |
-| App restarts during upload | Reload job and resume only missing work. |
+| Recall bot creation gagal | Persist `failed`, tampilkan error aman di control panel. |
+| Bot rejected atau fatal | Persist Recall code/subcode dan tandai `failed`. |
+| Waiting-room timeout | Biarkan Recall mengakhiri bot; state mengikuti webhook. |
+| Recording gagal | Tandai `failed`; jangan minta transcript. |
+| Request transcript gagal sementara | Retry lewat `RecallClient`. |
+| Transcript gagal permanen | Lanjut video-only upload dan mark `completed_with_errors`. |
+| Download MP4 gagal | Persist error dan biarkan retry lewat startup/event berikutnya. |
+| Salah satu upload Drive gagal | Pertahankan artefak yang sukses; retry hanya artefak yang kurang. |
+| Duplicate webhook | Return `2xx`; processing idempotent tidak membuat duplikasi. |
+| Signature webhook tidak valid | Return `4xx`; jangan simpan atau proses payload. |
+| Aplikasi restart saat upload | Muat ulang job dan lanjutkan hanya pekerjaan yang belum selesai. |
+| OpenAI rate limit / timeout / server error | Jadwalkan retry job-level sesuai backoff. |
+| OpenAI auth / permission / prompt / input oversize | Tandai failed tanpa auto-retry. |
 
-## 16. Future evolution
+## 15. Evolusi ke depan
 
-When usage grows beyond one container, evolve the architecture in this order:
+Saat beban tumbuh melebihi satu container, evolusikan arsitektur dalam urutan ini:
 
-1. Replace the JSON store with PostgreSQL.
-2. Add a durable queue such as Redis/BullMQ, SQS, or RabbitMQ.
-3. Split webhook acknowledgment and artifact workers into separate processes.
-4. Store webhook event IDs for explicit deduplication and audit.
-5. Add object storage as a staging area for large media.
-6. Add user accounts, authorization, and tenant-specific Drive routing.
-7. Add scheduling and calendar integrations while retaining the same `join_at` abstraction.
-
-
-
-
-
-
+1. ganti JSON store dengan PostgreSQL;
+2. tambahkan durable queue seperti Redis/BullMQ, SQS, atau RabbitMQ;
+3. pisahkan webhook acknowledgment dan worker artefak ke proses terpisah;
+4. simpan webhook event ID untuk deduplication dan audit yang eksplisit;
+5. tambahkan object storage sebagai staging area untuk media besar;
+6. tambahkan user account, authorization, dan routing Drive per tenant;
+7. tambahkan scheduling dan calendar integration sambil tetap mempertahankan abstraksi `join_at`.

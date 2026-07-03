@@ -70,6 +70,27 @@ export async function renderAgentPrompt(
     };
 }
 
+export async function verifyAgentPromptFilesReadable(
+    dependencies: AgentPromptDependencies = {},
+) {
+    const seminar = await renderAgentPrompt(
+        {
+            meetingType: 'seminar',
+            generationDate: new Date('2026-07-03T00:00:00.000Z'),
+        },
+        dependencies,
+    );
+    const rapat = await renderAgentPrompt(
+        {
+            meetingType: 'rapat',
+            generationDate: new Date('2026-07-03T00:00:00.000Z'),
+        },
+        dependencies,
+    );
+
+    return [seminar.sourcePath, rapat.sourcePath];
+}
+
 export function resetAgentPromptCacheForTests() {
     PROMPT_CACHE.clear();
 }

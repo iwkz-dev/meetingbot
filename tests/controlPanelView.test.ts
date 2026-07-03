@@ -17,3 +17,15 @@ test('control panel invite form includes optional onJoinMessage field', async ()
     assert.match(html, /const payload = Object\.fromEntries\([\s\S]*new FormData\(inviteForm\)\.entries\(\)[\s\S]*\);/);
     assert.match(html, /if \(response\.ok\) \{\s*inviteForm\.reset\(\);\s*\}/);
 });
+
+test('control panel view still polls protected APIs only', async () => {
+    const html = await fs.promises.readFile(
+        path.join(process.cwd(), 'src/views/control-panel.html'),
+        'utf8',
+    );
+
+    assert.equal(html.includes('/api/control-panel/state'), true);
+    assert.equal(html.includes('/api/control-panel/history'), true);
+    assert.equal(html.includes('/api/control-panel/meetings/'), true);
+});
+

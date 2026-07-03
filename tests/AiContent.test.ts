@@ -4,6 +4,7 @@ import {
     buildDefaultAiContentState,
     formatAiCurrentDate,
     hasRequiredAiSourceArtifacts,
+    isRetryableAiErrorCode,
     meetingTypeToAgentPromptPath,
     meetingTypeToAiContentKind,
     meetingTypeToOutputSuffix,
@@ -87,3 +88,14 @@ test('sanitizeAiErrorMessage removes control characters and redacts obvious keys
     assert.equal(result.includes('sk-secret-12345'), false);
     assert.equal(result, 'boom [redacted] next');
 });
+
+test('retryable AI error helper only retries operational failures', () => {
+    assert.equal(isRetryableAiErrorCode('OPENAI_RATE_LIMIT'), true);
+    assert.equal(isRetryableAiErrorCode('OPENAI_TIMEOUT'), true);
+    assert.equal(isRetryableAiErrorCode('OPENAI_INPUT_CONTEXT_TOO_LARGE'), false);
+    assert.equal(isRetryableAiErrorCode('OPENAI_AUTHENTICATION_FAILED'), false);
+    assert.equal(isRetryableAiErrorCode(null), false);
+});
+
+
+

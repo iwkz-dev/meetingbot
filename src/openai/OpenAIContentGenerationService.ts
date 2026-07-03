@@ -15,6 +15,7 @@ import { DriveArtifact, MeetingJob } from '../types';
 import { renderAgentPrompt } from './AgentPromptService';
 import {
     hasRequiredAiSourceArtifacts,
+    isRetryableAiErrorCode,
     meetingTypeToOutputSuffix,
     sanitizeAiErrorMessage,
 } from './AiContent';
@@ -23,15 +24,14 @@ import { getOpenAIClient } from './OpenAIClient';
 const MAX_OPENAI_INPUT_BYTES = 48 * 1024 * 1024;
 const TRANSCRIPT_SOURCE_SUFFIX = '.transcript.txt';
 const PARTICIPANT_SOURCE_SUFFIX = '.participants.txt';
+const AI_MAX_GENERATION_ATTEMPTS = 5;
+const AI_RETRY_DELAYS_MS = [60000, 300000, 900000, 3600000, 21600000];
+const AI_STALE_PROCESSING_MS = 30 * 60 * 1000;
 
 type AiLogger = {
     info: (message: string, metadata?: unknown) => void;
     warn: (message: string, metadata?: unknown) => void;
     error: (message: string, metadata?: unknown) => void;
-};
-
-type OpenAIFileLike = {
-    id: string;
 };
 
 type OpenAIResponseLike = {
@@ -65,6 +65,13 @@ type GenerateAiContentArgs = {
     tempDir: string;
     transcriptTextPath?: string;
     participantTextPath?: string;
+    persistAiState: PersistAiState;
+};
+
+type RecoverAiContentArgs = {
+    meeting: MeetingJob;
+    baseName: string;
+    driveFolderId: string;
     persistAiState: PersistAiState;
 };
 
@@ -105,6 +112,67 @@ export class OpenAIContentGenerationService {
         this.now = dependencies.now ?? (() => new Date().toISOString());
     }
 
+    async recoverStateForMeeting(args: RecoverAiContentArgs) {
+        const outputFilename =
+            args.meeting.aiContent.outputFilename ??
+            `${args.baseName}${meetingTypeToOutputSuffix(args.meeting.meetingType)}`;
+
+        const existingDriveArtifact = await this.findExistingDriveArtifact(
+            outputFilename,
+            args.driveFolderId,
+        );
+        if (existingDriveArtifact) {
+            await this.persistDoneState(args, existingDriveArtifact.id, outputFilename, {
+                completedAt: args.meeting.aiContent.completedAt ?? this.now(),
+            });
+            return (await args.persistAiState((aiContent) => aiContent)) ?? args.meeting;
+        }
+
+        if (!hasRequiredAiSourceArtifacts(args.meeting)) {
+            const updated = await args.persistAiState((aiContent) => ({
+                ...aiContent,
+                status: 'not_ready',
+                nextRetryAt: null,
+            }));
+            return updated ?? args.meeting;
+        }
+
+        if (!isAiProcessingStale(args.meeting.aiContent, this.now())) {
+            return args.meeting;
+        }
+
+        const cleanupCleared = await this.cleanupOpenAiFiles(
+            args.meeting.aiContent.openaiInputFileIds,
+            args.meeting.id,
+        );
+        const nextStatus = args.meeting.aiContent.attemptCount >= AI_MAX_GENERATION_ATTEMPTS
+            ? 'failed'
+            : 'pending';
+        const updated = await args.persistAiState((aiContent) => ({
+            ...aiContent,
+            status: nextStatus,
+            nextRetryAt:
+                nextStatus === 'pending'
+                    ? this.now()
+                    : null,
+            openaiInputFileIds: cleanupCleared ? [] : aiContent.openaiInputFileIds,
+            errorCode: aiContent.errorCode ?? 'OPENAI_TIMEOUT',
+            errorMessage: aiContent.errorMessage ?? 'AI processing was recovered after a stale in-progress attempt.',
+        }));
+
+        this.logger.warn('AI content processing recovered from stale state', {
+            meetingId: args.meeting.id,
+            meetingType: args.meeting.meetingType,
+            kind: args.meeting.aiContent.kind,
+            stateTransition: 'processing->' + nextStatus,
+            attemptCount: args.meeting.aiContent.attemptCount,
+            model: this.config.openaiModel,
+            errorCode: updated?.aiContent.errorCode ?? args.meeting.aiContent.errorCode,
+        });
+
+        return updated ?? args.meeting;
+    }
+
     async generateForMeeting(args: GenerateAiContentArgs): Promise<void> {
         if (!hasRequiredAiSourceArtifacts(args.meeting)) {
             return;
@@ -140,6 +208,7 @@ export class OpenAIContentGenerationService {
             generationDateIso: aiContent.generationDateIso ?? generationDateIso,
             attemptCount: aiContent.attemptCount + 1,
             lastAttemptAt: this.now(),
+            nextRetryAt: null,
             completedAt: null,
             openaiResponseId: null,
             openaiRequestId: null,
@@ -152,7 +221,30 @@ export class OpenAIContentGenerationService {
 
         const activeMeeting = startedMeeting ?? args.meeting;
         const openaiFileIds: string[] = [];
+        const startTimeMs = Date.now();
         let generationSucceeded = false;
+        let responseMetadata: {
+            responseId: string | null;
+            requestId: string | null;
+            inputTokens: number | null;
+            outputTokens: number | null;
+            driveFileId: string | null;
+        } = {
+            responseId: null,
+            requestId: null,
+            inputTokens: null,
+            outputTokens: null,
+            driveFileId: null,
+        };
+
+        this.logger.info('AI content generation started', {
+            meetingId: activeMeeting.id,
+            meetingType: activeMeeting.meetingType,
+            kind: activeMeeting.aiContent.kind,
+            stateTransition: 'pending->processing',
+            attemptCount: activeMeeting.aiContent.attemptCount,
+            model: this.config.openaiModel,
+        });
 
         try {
             const sources = await this.materializeSourceFiles({
@@ -187,7 +279,11 @@ export class OpenAIContentGenerationService {
                 }));
                 this.logger.info('OpenAI input file uploaded', {
                     meetingId: activeMeeting.id,
+                    meetingType: activeMeeting.meetingType,
                     kind: activeMeeting.aiContent.kind,
+                    stateTransition: 'processing->processing',
+                    attemptCount: activeMeeting.aiContent.attemptCount,
+                    model: this.config.openaiModel,
                     fileName: source.fileName,
                     byteSize: source.byteSize,
                     openaiFileId: uploaded.id,
@@ -212,6 +308,7 @@ export class OpenAIContentGenerationService {
                 tools: [],
             });
 
+            responseMetadata.inputTokens = tokenCount.input_tokens;
             await args.persistAiState((aiContent) => ({
                 ...aiContent,
                 inputTokens: tokenCount.input_tokens,
@@ -235,13 +332,16 @@ export class OpenAIContentGenerationService {
                 tools: [],
             })) as OpenAIResponseLike;
 
+            responseMetadata.responseId = response.id;
+            responseMetadata.requestId = asRequestId(response._request_id);
+            responseMetadata.outputTokens =
+                typeof response.usage?.output_tokens === 'number'
+                    ? response.usage.output_tokens
+                    : null;
             await args.persistAiState((aiContent) => ({
                 ...aiContent,
                 openaiResponseId: response.id,
-                openaiRequestId:
-                    typeof response._request_id === 'string' && response._request_id.trim()
-                        ? response._request_id.trim()
-                        : null,
+                openaiRequestId: asRequestId(response._request_id),
                 outputTokens:
                     typeof response.usage?.output_tokens === 'number'
                         ? response.usage.output_tokens
@@ -273,16 +373,11 @@ export class OpenAIContentGenerationService {
                 args.driveFolderId,
             );
             if (alreadyUploaded) {
+                responseMetadata.driveFileId = alreadyUploaded.id;
                 await this.persistDoneState(args, alreadyUploaded.id, outputFilename, {
                     openaiResponseId: response.id,
-                    openaiRequestId:
-                        typeof response._request_id === 'string' && response._request_id.trim()
-                            ? response._request_id.trim()
-                            : null,
-                    outputTokens:
-                        typeof response.usage?.output_tokens === 'number'
-                            ? response.usage.output_tokens
-                            : null,
+                    openaiRequestId: asRequestId(response._request_id),
+                    outputTokens: responseMetadata.outputTokens,
                     completedAt: this.now(),
                 });
                 generationSucceeded = true;
@@ -307,37 +402,48 @@ export class OpenAIContentGenerationService {
                 );
             }
 
+            responseMetadata.driveFileId = uploadedMarkdown.id;
             await this.persistDoneState(args, uploadedMarkdown.id, outputFilename, {
                 openaiResponseId: response.id,
-                openaiRequestId:
-                    typeof response._request_id === 'string' && response._request_id.trim()
-                        ? response._request_id.trim()
-                        : null,
+                openaiRequestId: asRequestId(response._request_id),
                 inputTokens: tokenCount.input_tokens,
-                outputTokens:
-                    typeof response.usage?.output_tokens === 'number'
-                        ? response.usage.output_tokens
-                        : null,
+                outputTokens: responseMetadata.outputTokens,
                 completedAt: this.now(),
             });
             generationSucceeded = true;
         } catch (error) {
             const failure = classifyAiGenerationError(error);
+            const attemptCount = activeMeeting.aiContent.attemptCount;
+            const shouldRetry = failure.retryable && attemptCount < AI_MAX_GENERATION_ATTEMPTS;
+            const nextRetryAt = shouldRetry
+                ? addDelayToIso(this.now(), getAiRetryDelayMs(attemptCount))
+                : null;
+
             await args.persistAiState((aiContent) => ({
                 ...aiContent,
-                status: failure.retryable ? 'pending' : 'failed',
+                status: shouldRetry ? 'pending' : 'failed',
                 outputFilename,
                 generationDateIso: aiContent.generationDateIso ?? generationDateIso,
+                nextRetryAt,
                 errorCode: failure.code,
                 errorMessage: sanitizeAiErrorMessage(failure.message),
                 completedAt: null,
             }));
             this.logger.error('AI content generation failed', {
                 meetingId: activeMeeting.id,
+                meetingType: activeMeeting.meetingType,
                 kind: activeMeeting.aiContent.kind,
-                code: failure.code,
-                retryable: failure.retryable,
-                error: sanitizeAiErrorMessage(failure.message),
+                stateTransition: `processing->${shouldRetry ? 'pending' : 'failed'}`,
+                attemptCount,
+                model: this.config.openaiModel,
+                inputTokenCount: responseMetadata.inputTokens,
+                outputTokenCount: responseMetadata.outputTokens,
+                openaiResponseId: responseMetadata.responseId,
+                openaiRequestId: responseMetadata.requestId,
+                driveOutputFileId: responseMetadata.driveFileId,
+                durationMs: Date.now() - startTimeMs,
+                errorCode: failure.code,
+                retryable: shouldRetry,
             });
         } finally {
             const cleanupCleared = await this.cleanupOpenAiFiles(openaiFileIds, activeMeeting.id);
@@ -351,8 +457,18 @@ export class OpenAIContentGenerationService {
             if (generationSucceeded) {
                 this.logger.info('AI content generation completed', {
                     meetingId: activeMeeting.id,
+                    meetingType: activeMeeting.meetingType,
                     kind: activeMeeting.aiContent.kind,
-                    outputFilename,
+                    stateTransition: 'processing->done',
+                    attemptCount: activeMeeting.aiContent.attemptCount,
+                    model: this.config.openaiModel,
+                    inputTokenCount: responseMetadata.inputTokens,
+                    outputTokenCount: responseMetadata.outputTokens,
+                    openaiResponseId: responseMetadata.responseId,
+                    openaiRequestId: responseMetadata.requestId,
+                    driveOutputFileId: responseMetadata.driveFileId,
+                    durationMs: Date.now() - startTimeMs,
+                    errorCode: null,
                 });
             }
         }
@@ -450,6 +566,7 @@ export class OpenAIContentGenerationService {
             status: aiContent.driveFileId ? 'done' : 'pending',
             outputFilename,
             generationDateIso: aiContent.generationDateIso ?? generationDateIso,
+            nextRetryAt: null,
             errorCode: null,
             errorMessage: null,
         }));
@@ -466,7 +583,7 @@ export class OpenAIContentGenerationService {
     }
 
     private async persistDoneState(
-        args: GenerateAiContentArgs,
+        args: Pick<GenerateAiContentArgs, 'persistAiState'> | Pick<RecoverAiContentArgs, 'persistAiState'>,
         driveFileId: string,
         outputFilename: string,
         metadata: {
@@ -488,6 +605,7 @@ export class OpenAIContentGenerationService {
                 metadata.inputTokens === undefined ? aiContent.inputTokens : metadata.inputTokens,
             outputTokens:
                 metadata.outputTokens === undefined ? aiContent.outputTokens : metadata.outputTokens,
+            nextRetryAt: null,
             errorCode: null,
             errorMessage: null,
             completedAt: metadata.completedAt,
@@ -649,6 +767,42 @@ export function normalizeGeneratedMarkdown(value: string) {
     return trimmed ? `${trimmed}\n` : '';
 }
 
+export function isAiProcessingStale(
+    aiContent: Pick<MeetingJob['aiContent'], 'status' | 'lastAttemptAt'>,
+    nowIso: string,
+) {
+    if (aiContent.status !== 'processing' || !aiContent.lastAttemptAt) {
+        return false;
+    }
+
+    const lastAttemptTime = Date.parse(aiContent.lastAttemptAt);
+    const nowTime = Date.parse(nowIso);
+    if (Number.isNaN(lastAttemptTime) || Number.isNaN(nowTime)) {
+        return false;
+    }
+
+    return nowTime - lastAttemptTime >= AI_STALE_PROCESSING_MS;
+}
+
+export function getAiRetryDelayMs(attemptCount: number) {
+    const index = Math.max(0, Math.min(AI_RETRY_DELAYS_MS.length - 1, attemptCount - 1));
+    return AI_RETRY_DELAYS_MS[index] ?? AI_RETRY_DELAYS_MS[AI_RETRY_DELAYS_MS.length - 1] ?? 60000;
+}
+
+function addDelayToIso(baseIso: string, delayMs: number) {
+    const baseTime = Date.parse(baseIso);
+    if (Number.isNaN(baseTime)) {
+        return null;
+    }
+
+    return new Date(baseTime + delayMs).toISOString();
+}
+
+function asRequestId(value: string | null | undefined) {
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 function toLowerMeetingType(meetingType: MeetingJob['meetingType']) {
     return meetingType === 'SEMINAR' ? 'seminar' : 'rapat';
 }
+

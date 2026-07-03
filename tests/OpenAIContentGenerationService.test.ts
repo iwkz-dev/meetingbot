@@ -4,7 +4,11 @@ import path from 'node:path';
 import test from 'node:test';
 import { buildMeetingArtifactBaseName } from '../src/MeetingProcessingService';
 import { MeetingStore } from '../src/MeetingStore';
-import { OpenAIContentGenerationService } from '../src/openai/OpenAIContentGenerationService';
+import {
+    OpenAIContentGenerationService,
+    getAiRetryDelayMs,
+    isAiProcessingStale,
+} from '../src/openai/OpenAIContentGenerationService';
 import { MeetingJob } from '../src/types';
 import { buildConfig, createTempDir } from './helpers';
 
@@ -336,3 +340,117 @@ test('OpenAIContentGenerationService sanitizes AI errors before persistence', as
     assert.equal(updated?.aiContent.errorCode, 'OPENAI_SERVER_ERROR');
     assert.equal(updated?.aiContent.errorMessage?.includes('sk-secret-123'), false);
 });
+
+test('OpenAIContentGenerationService schedules retryable failures with delayed nextRetryAt', async () => {
+    const harness = await createHarness({
+        transcriptText: 'seminar transcript',
+        createImpl: async () => {
+            throw new Error('temporary upstream issue');
+        },
+    });
+    const updated = await runGeneration(harness);
+
+    assert.equal(updated?.aiContent.status, 'pending');
+    assert.equal(updated?.aiContent.errorCode, 'OPENAI_SERVER_ERROR');
+    assert.equal(updated?.aiContent.nextRetryAt, '2026-07-03T10:01:00.000Z');
+    assert.equal(updated?.aiContent.attemptCount, 1);
+});
+
+test('OpenAIContentGenerationService recovers stale processing by marking Drive hits done', async () => {
+    const harness = await createHarness({
+        findFileResult: {
+            id: 'drive-existing-2',
+            name: 'existing.blog.md',
+            link: 'https://drive.example/files/existing.blog.md',
+        },
+    });
+    await harness.store.updateJob(harness.meeting.id, (current) => ({
+        ...current,
+        aiContent: {
+            ...current.aiContent,
+            status: 'processing',
+            attemptCount: 2,
+            lastAttemptAt: '2026-07-03T09:00:00.000Z',
+            outputFilename: `${harness.baseName}.blog.md`,
+            openaiInputFileIds: ['openai-file-1'],
+        },
+    }));
+    const meeting = await harness.store.getById(harness.meeting.id);
+    assert.ok(meeting);
+
+    const recovered = await harness.service.recoverStateForMeeting({
+        meeting,
+        baseName: harness.baseName,
+        driveFolderId: 'folder-1',
+        persistAiState: (updater) =>
+            harness.store.updateJob(harness.meeting.id, (current) => ({
+                ...current,
+                aiContent: updater(current.aiContent),
+            })),
+    });
+
+    assert.equal(recovered.aiContent.status, 'done');
+    assert.equal(recovered.aiContent.driveFileId, 'drive-existing-2');
+});
+
+test('OpenAIContentGenerationService recovers stale processing into pending and cleans temporary file ids', async () => {
+    const harness = await createHarness({
+        transcriptText: 'seminar transcript',
+    });
+    await harness.store.updateJob(harness.meeting.id, (current) => ({
+        ...current,
+        aiContent: {
+            ...current.aiContent,
+            status: 'processing',
+            attemptCount: 2,
+            lastAttemptAt: '2026-07-03T09:00:00.000Z',
+            openaiInputFileIds: ['openai-file-stale-1'],
+        },
+    }));
+    const meeting = await harness.store.getById(harness.meeting.id);
+    assert.ok(meeting);
+
+    const recovered = await harness.service.recoverStateForMeeting({
+        meeting,
+        baseName: harness.baseName,
+        driveFolderId: 'folder-1',
+        persistAiState: (updater) =>
+            harness.store.updateJob(harness.meeting.id, (current) => ({
+                ...current,
+                aiContent: updater(current.aiContent),
+            })),
+    });
+
+    assert.equal(recovered.aiContent.status, 'pending');
+    assert.equal(recovered.aiContent.nextRetryAt, '2026-07-03T10:00:00.000Z');
+    assert.deepEqual(recovered.aiContent.openaiInputFileIds, []);
+    assert.deepEqual(harness.deletedOpenAiFiles, ['openai-file-stale-1']);
+});
+
+test('OpenAI retry helpers expose backoff and stale-window behavior', () => {
+    assert.equal(getAiRetryDelayMs(1), 60000);
+    assert.equal(getAiRetryDelayMs(2), 300000);
+    assert.equal(getAiRetryDelayMs(5), 21600000);
+    assert.equal(
+        isAiProcessingStale(
+            {
+                status: 'processing',
+                lastAttemptAt: '2026-07-03T09:29:59.000Z',
+            },
+            '2026-07-03T10:00:00.000Z',
+        ),
+        true,
+    );
+    assert.equal(
+        isAiProcessingStale(
+            {
+                status: 'processing',
+                lastAttemptAt: '2026-07-03T09:45:00.000Z',
+            },
+            '2026-07-03T10:00:00.000Z',
+        ),
+        false,
+    );
+});
+
+

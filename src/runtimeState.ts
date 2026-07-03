@@ -1,4 +1,19 @@
-import { ControlPanelMeeting, MeetingJob, RuntimeStats } from './types';
+import { ControlPanelAiContent, ControlPanelMeeting, MeetingJob, RuntimeStats } from './types';
+
+export function serializeMeetingAiContentForControlPanel(
+    aiContent: MeetingJob['aiContent'],
+): ControlPanelAiContent {
+    return {
+        kind: aiContent.kind,
+        status: aiContent.status,
+        attemptCount: aiContent.attemptCount,
+        lastAttemptAt: aiContent.lastAttemptAt,
+        completedAt: aiContent.completedAt,
+        outputFilename: aiContent.outputFilename,
+        errorCode: aiContent.errorCode,
+        errorMessage: aiContent.errorMessage,
+    };
+}
 
 export function serializeMeetingForControlPanel(
     meeting: MeetingJob,
@@ -21,6 +36,7 @@ export function serializeMeetingForControlPanel(
         videoUpload: meeting.videoUpload,
         transcriptJsonUpload: meeting.transcriptJsonUpload,
         transcriptTextUpload: meeting.transcriptTextUpload,
+        aiContent: serializeMeetingAiContentForControlPanel(meeting.aiContent),
         lastError: meeting.lastError,
     };
 }

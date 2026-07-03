@@ -8,6 +8,10 @@ import {
     MeetingControllerError,
     buildRuntimeStats,
 } from './MeetingController';
+import {
+    MeetingProcessingService,
+    MeetingProcessingServiceError,
+} from './MeetingProcessingService';
 import { MeetingStore } from './MeetingStore';
 import {
     RecallWebhookService,
@@ -23,6 +27,7 @@ export type AppDependencies = {
     config: AppConfig;
     store: Pick<MeetingStore, 'listNewestFirst'>;
     meetingController: Pick<MeetingController, 'inviteBot' | 'leaveMeeting'>;
+    meetingProcessingService: Pick<MeetingProcessingService, 'retryAiContent'>;
     recallWebhookService: Pick<
         RecallWebhookService,
         'verifyAndParse' | 'acknowledgeAndProcess'
@@ -142,6 +147,14 @@ export function createApp(dependencies: AppDependencies) {
     );
 
     app.post(
+        '/api/control-panel/meetings/:meetingId/retry-ai',
+        requireControlPanelAuth,
+        async (req, res) => {
+            await retryAiContent(req, res);
+        },
+    );
+
+    app.post(
         '/api/control-panel/sessions/:meetingId/stop',
         requireControlPanelAuth,
         async (req, res) => {
@@ -163,6 +176,17 @@ export function createApp(dependencies: AppDependencies) {
     async function leaveMeeting(req: Request, res: Response) {
         try {
             const result = await dependencies.meetingController.leaveMeeting(
+                req.params.meetingId ?? '',
+            );
+            res.status(202).send(result);
+        } catch (error) {
+            handleControllerError(error, res);
+        }
+    }
+
+    async function retryAiContent(req: Request, res: Response) {
+        try {
+            const result = await dependencies.meetingProcessingService.retryAiContent(
                 req.params.meetingId ?? '',
             );
             res.status(202).send(result);
@@ -200,7 +224,10 @@ export function createApp(dependencies: AppDependencies) {
     }
 
     function handleControllerError(error: unknown, res: Response) {
-        if (error instanceof MeetingControllerError) {
+        if (
+            error instanceof MeetingControllerError ||
+            error instanceof MeetingProcessingServiceError
+        ) {
             res.status(error.statusCode).send({
                 result: 'error',
                 message: error.message,
@@ -265,4 +292,3 @@ function buildCookie(name: string, value: string, maxAgeSeconds: number) {
         `Max-Age=${maxAgeSeconds}`,
     ].join('; ');
 }
-

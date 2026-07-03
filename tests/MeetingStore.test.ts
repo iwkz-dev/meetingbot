@@ -189,3 +189,27 @@ test('MeetingStore retains active jobs while pruning old terminal records', asyn
     assert.equal(activeJobs[0]?.id, activeJob.id);
     assert.equal(jobs.length, 201);
 });
+
+test('MeetingStore preserves persisted AI retry scheduling fields', async () => {
+    const dataDir = await createTempDir();
+    const store = await MeetingStore.create(dataDir);
+    const job = await store.createJob(buildCreateInput('SEMINAR'));
+
+    await store.updateJob(job.id, (current) => ({
+        ...current,
+        aiContent: {
+            ...current.aiContent,
+            status: 'pending',
+            attemptCount: 3,
+            nextRetryAt: '2026-07-03T10:15:00.000Z',
+        },
+    }));
+
+    const reloaded = await MeetingStore.create(dataDir);
+    const persisted = expectMeetingJob(await reloaded.getById(job.id));
+    assert.equal(persisted.aiContent.status, 'pending');
+    assert.equal(persisted.aiContent.attemptCount, 3);
+    assert.equal(persisted.aiContent.nextRetryAt, '2026-07-03T10:15:00.000Z');
+});
+
+

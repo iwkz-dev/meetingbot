@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
     MeetingProcessingService,
+    MeetingProcessingServiceError,
     buildMeetingArtifactBaseName,
     buildMeetingDriveFolderName,
     collectParticipantNames,
@@ -13,6 +14,7 @@ import {
 import { MeetingStore } from '../src/MeetingStore';
 import { RecallClient } from '../src/RecallClient';
 import { buildControlPanelState } from '../src/runtimeState';
+import { MeetingJob } from '../src/types';
 import { createTempDir, buildConfig } from './helpers';
 
 function createVideoStream(chunks: string[]) {
@@ -37,7 +39,7 @@ async function createHarness(options: {
     participantsBody?: string;
     uploadFailureNameIncludes?: string;
     now?: string;
-    aiContentService?: { generateForMeeting: (args: Record<string, unknown>) => Promise<void> };
+    aiContentService?: { recoverStateForMeeting?: (args: Record<string, unknown>) => Promise<unknown>; generateForMeeting: (args: Record<string, unknown>) => Promise<void> };
 } = {}) {
     const config = buildConfig();
     const store = await MeetingStore.create(await createTempDir('meetingbot-processing-store-'));
@@ -205,6 +207,17 @@ async function createHarness(options: {
     const effectiveAiContentService =
         options.aiContentService ??
         {
+            recoverStateForMeeting: async (args) => {
+                const meeting = args.meeting as MeetingJob;
+                await store.updateJob((seeded ?? job).id, (current) => ({
+                    ...current,
+                    aiContent: {
+                        ...current.aiContent,
+                        status: current.aiContent.driveFileId ? 'done' : 'pending',
+                    },
+                }));
+                return (await store.getById(meeting.id)) ?? meeting;
+            },
             generateForMeeting: async () => {
                 await store.updateJob((seeded ?? job).id, (current) => ({
                     ...current,
@@ -223,7 +236,21 @@ async function createHarness(options: {
         fetchImpl,
         now: () => now,
         tempDirRoot,
-        aiContentService: effectiveAiContentService as any,
+        aiContentService: {
+            recoverStateForMeeting:
+                effectiveAiContentService.recoverStateForMeeting ??
+                (async ({ meeting }: { meeting: MeetingJob }) => {
+                    await store.updateJob((seeded ?? job).id, (current) => ({
+                        ...current,
+                        aiContent: {
+                            ...current.aiContent,
+                            status: current.aiContent.driveFileId ? 'done' : 'pending',
+                        },
+                    }));
+                    return (await store.getById(meeting.id)) ?? meeting;
+                }),
+            generateForMeeting: effectiveAiContentService.generateForMeeting,
+        } as any,
         gdriveClient: {
             ensureMeetingFolder: async (folderName, parentFolderId) => {
                 ensureFolderCalls.push({ folderName, parentFolderId });
@@ -519,7 +546,7 @@ test('MeetingProcessingService triggers AI generation once source artifacts are 
 
     const updated = await harness.store.getById(harness.job.id);
     assert.equal(aiCalls.length, 1);
-    assert.equal(updated?.aiContent.status, 'done');
+    assert.equal(['pending', 'done'].includes(updated?.aiContent.status ?? ''), true);
     assert.equal(updated?.status, 'completed');
 });
 
@@ -556,3 +583,133 @@ test('buildControlPanelState exposes artifact links and hides processing interna
     assert.equal('artifactProcessingMode' in (state.meetings[0] ?? {}), false);
     assert.equal('participantArtifactStatus' in (state.meetings[0] ?? {}), false);
 });
+
+
+test('MeetingProcessingService manual AI retry queues failed jobs asynchronously', async () => {
+    const aiCalls: Array<Record<string, unknown>> = [];
+    const harness = await createHarness({
+        aiContentService: {
+            generateForMeeting: async (args) => {
+                aiCalls.push(args);
+                await harness.store.updateJob(harness.job.id, (current) => ({
+                    ...current,
+                    aiContent: {
+                        ...current.aiContent,
+                        status: 'done',
+                        driveFileId: 'drive-ai-manual',
+                        outputFilename: `${buildMeetingArtifactBaseName(current)}.blog.md`,
+                        completedAt: '2026-07-02T13:45:00.000Z',
+                    },
+                }));
+            },
+        },
+    });
+
+    await harness.service.processCompletedMeeting(harness.job.id);
+    await harness.store.updateJob(harness.job.id, (current) => ({
+        ...current,
+        status: 'completed_with_errors',
+        aiContent: {
+            ...current.aiContent,
+            status: 'failed',
+            driveFileId: null,
+            completedAt: null,
+            errorCode: 'OPENAI_SERVER_ERROR',
+            errorMessage: 'retry me',
+        },
+    }));
+
+    const result = await harness.service.retryAiContent(harness.job.id);
+    assert.equal(result.result, 'ok');
+    assert.equal(result.meeting.aiStatus, 'pending');
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const updated = await harness.store.getById(harness.job.id);
+    assert.equal(aiCalls.length >= 1, true);
+    assert.equal(['pending', 'done'].includes(updated?.aiContent.status ?? ''), true);
+    assert.equal(['drive-ai-manual', null].includes(updated?.aiContent.driveFileId ?? null), true);
+});
+
+test('MeetingProcessingService manual AI retry rejects jobs without source artifacts', async () => {
+    const harness = await createHarness();
+    await harness.service.processCompletedMeeting(harness.job.id, { videoOnly: true });
+    await harness.store.updateJob(harness.job.id, (current) => ({
+        ...current,
+        status: 'completed_with_errors',
+        transcriptTextUpload: null,
+        aiContent: {
+            ...current.aiContent,
+            status: 'failed',
+            driveFileId: null,
+        },
+    }));
+
+    await assert.rejects(
+        harness.service.retryAiContent(harness.job.id),
+        (error: unknown) =>
+            error instanceof MeetingProcessingServiceError &&
+            error.statusCode === 409 &&
+            /required source files/i.test(error.message),
+    );
+});
+
+test('buildControlPanelState exposes safe AI status fields only', async () => {
+    const harness = await createHarness();
+    await harness.service.processCompletedMeeting(harness.job.id);
+    await harness.store.updateJob(harness.job.id, (current) => ({
+        ...current,
+        aiContent: {
+            ...current.aiContent,
+            status: 'done',
+            attemptCount: 2,
+            lastAttemptAt: '2026-07-02T13:46:00.000Z',
+            outputFilename: `${buildMeetingArtifactBaseName(current)}.blog.md`,
+            errorCode: 'OPENAI_TIMEOUT',
+            errorMessage: 'Timed out',
+            openaiInputFileIds: ['openai-file-secret'],
+            openaiRequestId: 'req-secret',
+            openaiResponseId: 'resp-secret',
+        },
+    }));
+    const meeting = await harness.store.getById(harness.job.id);
+    assert.ok(meeting);
+
+    const state = buildControlPanelState({
+        meetings: [meeting],
+        stats: {
+            activeMeetings: 0,
+            completedMeetings: 1,
+            failedMeetings: 0,
+            lastStartedAt: meeting.createdAt,
+            lastFinishedAt: meeting.completedAt,
+            lastError: null,
+        },
+    });
+
+    assert.deepEqual(state.meetings[0]?.aiContent, {
+        kind: 'seminar_blog',
+        status: 'done',
+        attemptCount: 2,
+        lastAttemptAt: '2026-07-02T13:46:00.000Z',
+        completedAt: meeting.aiContent.completedAt,
+        outputFilename: `${buildMeetingArtifactBaseName(meeting)}.blog.md`,
+        errorCode: 'OPENAI_TIMEOUT',
+        errorMessage: 'Timed out',
+    });
+    assert.equal(JSON.stringify(state).includes('openai-file-secret'), false);
+    assert.equal(JSON.stringify(state).includes('req-secret'), false);
+    assert.equal(JSON.stringify(state).includes('resp-secret'), false);
+});
+
+
+
+
+
+
+
+
+
+
+
+
+

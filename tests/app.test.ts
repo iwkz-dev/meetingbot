@@ -3,12 +3,14 @@ import http from 'node:http';
 import test from 'node:test';
 import { AddressInfo } from 'node:net';
 import { createApp } from '../src/app';
+import { MeetingProcessingServiceError } from '../src/MeetingProcessingService';
 import { ControlPanelHistoryMeeting } from '../src/types';
 import { buildConfig } from './helpers';
 
 function createTestApp(options: {
     controlPanelPassword?: string;
     loadControlPanelHistory?: () => Promise<ControlPanelHistoryMeeting[]>;
+    retryAiContent?: (meetingId: string) => Promise<unknown>;
 }) {
     const config = buildConfig({
         CONTROL_PANEL_PASSWORD: options.controlPanelPassword ?? 'secret-pass',
@@ -22,6 +24,15 @@ function createTestApp(options: {
         meetingController: {
             inviteBot: async () => ({ result: 'ok', message: 'bot join request accepted', meeting: { id: '1', recallBotId: 'bot-1', meetingSubject: 'Test', status: 'joining' } }),
             leaveMeeting: async () => ({ result: 'ok', message: 'left', meeting: { id: '1', recallBotId: 'bot-1', status: 'leaving' } }),
+        } as never,
+        meetingProcessingService: {
+            retryAiContent:
+                options.retryAiContent ??
+                (async (meetingId: string) => ({
+                    result: 'ok',
+                    message: 'AI content retry queued.',
+                    meeting: { id: meetingId, aiStatus: 'pending' },
+                })),
         } as never,
         recallWebhookService: {
             verifyAndParse: () => {
@@ -45,6 +56,16 @@ async function withServer(app: ReturnType<typeof createApp>, run: (baseUrl: stri
             server.close((error) => (error ? reject(error) : resolve())),
         );
     }
+}
+
+async function login(baseUrl: string) {
+    const loginResponse = await fetch(`${baseUrl}/control-panel/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ password: 'secret-pass' }),
+        redirect: 'manual',
+    });
+    return loginResponse.headers.get('set-cookie')?.split(';')[0] ?? '';
 }
 
 test('control panel history endpoint requires auth', async () => {
@@ -74,14 +95,7 @@ test('control panel history endpoint returns history after login', async () => {
     });
 
     await withServer(app, async (baseUrl) => {
-        const loginResponse = await fetch(`${baseUrl}/control-panel/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ password: 'secret-pass' }),
-            redirect: 'manual',
-        });
-        const cookie = loginResponse.headers.get('set-cookie')?.split(';')[0] ?? '';
-
+        const cookie = await login(baseUrl);
         const response = await fetch(`${baseUrl}/api/control-panel/history`, {
             headers: { Cookie: cookie },
         });
@@ -104,6 +118,9 @@ test('control panel history endpoint returns safe error payloads', async () => {
             inviteBot: async () => ({ result: 'ok', message: 'bot join request accepted', meeting: { id: '1', recallBotId: 'bot-1', meetingSubject: 'Test', status: 'joining' } }),
             leaveMeeting: async () => ({ result: 'ok', message: 'left', meeting: { id: '1', recallBotId: 'bot-1', status: 'leaving' } }),
         } as never,
+        meetingProcessingService: {
+            retryAiContent: async () => ({ result: 'ok', message: 'AI content retry queued.' }),
+        } as never,
         recallWebhookService: {
             verifyAndParse: () => {
                 throw new Error('unused');
@@ -116,14 +133,7 @@ test('control panel history endpoint returns safe error payloads', async () => {
     });
 
     await withServer(app, async (baseUrl) => {
-        const loginResponse = await fetch(`${baseUrl}/control-panel/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ password: 'secret-pass' }),
-            redirect: 'manual',
-        });
-        const cookie = loginResponse.headers.get('set-cookie')?.split(';')[0] ?? '';
-
+        const cookie = await login(baseUrl);
         const response = await fetch(`${baseUrl}/api/control-panel/history`, {
             headers: { Cookie: cookie },
         });
@@ -137,3 +147,69 @@ test('control panel history endpoint returns safe error payloads', async () => {
     });
 });
 
+test('control panel retry-ai endpoint requires auth', async () => {
+    const app = createTestApp({});
+
+    await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/control-panel/meetings/meeting-1/retry-ai`, {
+            method: 'POST',
+        });
+        const payload = await response.json();
+
+        assert.equal(response.status, 401);
+        assert.equal(payload.message, 'Unauthorized');
+    });
+});
+
+test('control panel retry-ai endpoint queues a retry after login', async () => {
+    const calls: string[] = [];
+    const app = createTestApp({
+        retryAiContent: async (meetingId: string) => {
+            calls.push(meetingId);
+            return {
+                result: 'ok',
+                message: 'AI content retry queued.',
+                meeting: { id: meetingId, aiStatus: 'pending' },
+            };
+        },
+    });
+
+    await withServer(app, async (baseUrl) => {
+        const cookie = await login(baseUrl);
+        const response = await fetch(`${baseUrl}/api/control-panel/meetings/meeting-1/retry-ai`, {
+            method: 'POST',
+            headers: { Cookie: cookie },
+        });
+        const payload = await response.json();
+
+        assert.equal(response.status, 202);
+        assert.equal(payload.message, 'AI content retry queued.');
+        assert.deepEqual(calls, ['meeting-1']);
+    });
+});
+
+test('control panel retry-ai endpoint returns safe operational errors', async () => {
+    const app = createTestApp({
+        retryAiContent: async () => {
+            throw new MeetingProcessingServiceError(
+                'AI content cannot be retried until the required source files are available.',
+                409,
+            );
+        },
+    });
+
+    await withServer(app, async (baseUrl) => {
+        const cookie = await login(baseUrl);
+        const response = await fetch(`${baseUrl}/api/control-panel/meetings/meeting-1/retry-ai`, {
+            method: 'POST',
+            headers: { Cookie: cookie },
+        });
+        const payload = await response.json();
+
+        assert.equal(response.status, 409);
+        assert.equal(
+            payload.message,
+            'AI content cannot be retried until the required source files are available.',
+        );
+    });
+});

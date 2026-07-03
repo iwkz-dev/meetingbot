@@ -10,6 +10,16 @@ const OUTPUT_SUFFIXES: Record<AiContentKind, string> = {
     rapat_meeting_notes: '.meeting-notes.md',
 };
 
+const RETRYABLE_AI_ERROR_CODES = new Set([
+    'OPENAI_RATE_LIMIT',
+    'OPENAI_TIMEOUT',
+    'OPENAI_CONNECTION_ERROR',
+    'OPENAI_SERVER_ERROR',
+    'OPENAI_OUTPUT_TRUNCATED',
+    'OPENAI_DRIVE_UPLOAD_FAILED',
+    'OPENAI_SOURCE_DOWNLOAD_FAILED',
+]);
+
 export type LowerMeetingType = 'seminar' | 'rapat';
 
 type AiReadinessMeeting = {
@@ -57,6 +67,10 @@ export function hasRequiredAiSourceArtifacts(meeting: AiReadinessMeeting) {
         : hasDriveArtifact(meeting.participantTextUpload);
 }
 
+export function isRetryableAiErrorCode(value: string | null | undefined) {
+    return Boolean(value && RETRYABLE_AI_ERROR_CODES.has(value));
+}
+
 export function buildDefaultAiContentState(meeting: AiReadinessMeeting): AiContentArtifactState {
     return {
         kind: meetingTypeToAiContentKind(meeting.meetingType),
@@ -71,6 +85,7 @@ export function buildDefaultAiContentState(meeting: AiReadinessMeeting): AiConte
         outputTokens: null,
         attemptCount: 0,
         lastAttemptAt: null,
+        nextRetryAt: null,
         completedAt: null,
         errorCode: null,
         errorMessage: null,
@@ -105,6 +120,7 @@ export function normalizeAiContentState(
         outputTokens: asNonNegativeNumber(rawState.outputTokens),
         attemptCount: asNonNegativeNumber(rawState.attemptCount) ?? 0,
         lastAttemptAt: asTrimmedString(rawState.lastAttemptAt),
+        nextRetryAt: asTrimmedString(rawState.nextRetryAt),
         completedAt: asTrimmedString(rawState.completedAt),
         errorCode: asTrimmedString(rawState.errorCode),
         errorMessage: asTrimmedString(rawState.errorMessage),

@@ -13,8 +13,14 @@ import {
 import { MeetingStore } from './MeetingStore';
 import { RecallClient } from './RecallClient';
 import { sanitizeFilenameBaseName } from './filename';
-import { hasRequiredAiSourceArtifacts } from './openai/AiContent';
-import { OpenAIContentGenerationService } from './openai/OpenAIContentGenerationService';
+import {
+    hasRequiredAiSourceArtifacts,
+    meetingTypeToOutputSuffix,
+} from './openai/AiContent';
+import {
+    isAiProcessingStale,
+    OpenAIContentGenerationService,
+} from './openai/OpenAIContentGenerationService';
 import {
     DriveArtifact,
     DriveFolder,
@@ -27,6 +33,7 @@ const DOWNLOAD_TIMEOUT_MS = 120000;
 const MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024;
 const MAX_PARTICIPANT_BYTES = 10 * 1024 * 1024;
 const PARTICIPANT_RETRY_DELAYS_MS = [60000, 300000, 900000, 1800000, 3600000];
+const MANUAL_AI_RETRY_COOLDOWN_MS = 15000;
 
 type FetchLike = typeof fetch;
 
@@ -63,6 +70,16 @@ type TranscriptBlock = {
     text: string;
 };
 
+export class MeetingProcessingServiceError extends Error {
+    constructor(
+        message: string,
+        readonly statusCode: number,
+    ) {
+        super(message);
+        this.name = 'MeetingProcessingServiceError';
+    }
+}
+
 export class MeetingProcessingService {
     private readonly fetchImpl: FetchLike;
     private readonly logger: ProcessingLogger;
@@ -71,6 +88,7 @@ export class MeetingProcessingService {
     private readonly gdriveClient: GDriveArtifactsClient;
     private readonly aiContentService: OpenAIContentGenerationService;
     private readonly locks = new Set<string>();
+    private readonly manualAiRetryCooldowns = new Map<string, number>();
 
     constructor(
         private readonly store: MeetingStore,
@@ -122,7 +140,7 @@ export class MeetingProcessingService {
                     Boolean(meeting.recallRecordingId) &&
                     hasMissingRequiredArtifacts(meeting)) ||
                 shouldRetryParticipantArtifacts(meeting, now) ||
-                shouldRetryAiContent(meeting),
+                shouldRetryAiContent(meeting, now),
         );
 
         await Promise.all(
@@ -134,6 +152,120 @@ export class MeetingProcessingService {
         );
 
         return requeueable.length;
+    }
+    async retryAiContent(meetingId: string) {
+        const meeting = await this.store.getById(meetingId);
+        if (!meeting) {
+            throw new MeetingProcessingServiceError('Meeting job not found.', 404);
+        }
+
+        const now = Date.parse(this.now());
+        const lastManualRetryAt = this.manualAiRetryCooldowns.get(meetingId) ?? 0;
+        if (now - lastManualRetryAt < MANUAL_AI_RETRY_COOLDOWN_MS) {
+            throw new MeetingProcessingServiceError(
+                'AI retry was requested too recently. Please wait a moment and try again.',
+                429,
+            );
+        }
+
+        if (!meeting.driveFolder?.id) {
+            throw new MeetingProcessingServiceError(
+                'AI content cannot be retried before the meeting Drive folder exists.',
+                409,
+            );
+        }
+
+        if (!hasRequiredAiSourceArtifacts(meeting)) {
+            throw new MeetingProcessingServiceError(
+                'AI content cannot be retried until the required source files are available.',
+                409,
+            );
+        }
+
+        const outputFilename =
+            meeting.aiContent.outputFilename ??
+            `${buildMeetingArtifactBaseName(meeting)}${meetingTypeToOutputSuffix(meeting.meetingType)}`;
+        const existingOutput = this.gdriveClient.findFileByName
+            ? await this.gdriveClient.findFileByName(
+                  outputFilename,
+                  meeting.driveFolder.id,
+              )
+            : null;
+
+        if (existingOutput) {
+            throw new MeetingProcessingServiceError(
+                'AI content already exists in Google Drive for this meeting.',
+                409,
+            );
+        }
+
+        if (
+            meeting.aiContent.status !== 'failed' &&
+            meeting.aiContent.status !== 'pending' &&
+            meeting.aiContent.status !== 'done'
+        ) {
+            throw new MeetingProcessingServiceError(
+                'AI content can only be retried from a failed, queued, or missing-output completed state.',
+                409,
+            );
+        }
+
+        const updated = await this.store.updateJob(meeting.id, (current) => ({
+            ...current,
+            aiContent: {
+                ...current.aiContent,
+                status: 'pending',
+                driveFileId:
+                    current.aiContent.status === 'done'
+                        ? null
+                        : current.aiContent.driveFileId,
+                outputFilename,
+                openaiResponseId:
+                    current.aiContent.status === 'done'
+                        ? null
+                        : current.aiContent.openaiResponseId,
+                openaiRequestId:
+                    current.aiContent.status === 'done'
+                        ? null
+                        : current.aiContent.openaiRequestId,
+                openaiInputFileIds: [],
+                nextRetryAt: null,
+                completedAt:
+                    current.aiContent.status === 'done'
+                        ? null
+                        : current.aiContent.completedAt,
+                errorCode: null,
+                errorMessage: null,
+            },
+        }));
+
+        if (!updated) {
+            throw new MeetingProcessingServiceError('Meeting job not found.', 404);
+        }
+
+        const queuedMeeting = await this.store.getById(meetingId);
+        if (!queuedMeeting) {
+            throw new MeetingProcessingServiceError('Meeting job not found.', 404);
+        }
+
+        this.manualAiRetryCooldowns.set(meetingId, now);
+        void this.processCompletedMeeting(meetingId, {
+            videoOnly: queuedMeeting.artifactProcessingMode === 'video_only',
+        }).catch((error) => {
+            this.logger.error('Manual AI retry processing failed', {
+                meetingId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        });
+
+        return {
+            result: 'ok' as const,
+            message: 'AI content retry queued.',
+            meeting: {
+                id: queuedMeeting.id,
+                aiStatus: queuedMeeting.aiContent.status,
+            },
+        };
     }
 
     private async processUnlocked(
@@ -620,8 +752,19 @@ export class MeetingProcessingService {
             return;
         }
 
-        const currentMeeting = (await this.store.getById(meeting.id)) ?? meeting;
-        if (!shouldAttemptAiContent(currentMeeting)) {
+        let currentMeeting = (await this.store.getById(meeting.id)) ?? meeting;
+        currentMeeting = await this.aiContentService.recoverStateForMeeting({
+            meeting: currentMeeting,
+            baseName,
+            driveFolderId: driveFolder.id,
+            persistAiState: (updater) =>
+                this.store.updateJob(meeting.id, (current) => ({
+                    ...current,
+                    aiContent: updater(current.aiContent),
+                })),
+        });
+
+        if (!shouldAttemptAiContent(currentMeeting, this.now())) {
             return;
         }
 
@@ -1159,7 +1302,7 @@ function hasMissingAiArtifact(meeting: MeetingJob) {
     return !hasCompletedAiContent(meeting);
 }
 
-function shouldAttemptAiContent(meeting: MeetingJob) {
+function shouldAttemptAiContent(meeting: MeetingJob, now: string) {
     if (!meeting.driveFolder?.id || !hasRequiredAiSourceArtifacts(meeting)) {
         return false;
     }
@@ -1168,11 +1311,23 @@ function shouldAttemptAiContent(meeting: MeetingJob) {
         return false;
     }
 
-    return meeting.aiContent.status !== 'failed' || !meeting.aiContent.errorCode;
+    if (meeting.aiContent.status === 'processing') {
+        return isAiProcessingStale(meeting.aiContent, now);
+    }
+
+    if (meeting.aiContent.status === 'pending') {
+        if (!meeting.aiContent.nextRetryAt) {
+            return true;
+        }
+
+        return compareIsoTimestamps(meeting.aiContent.nextRetryAt, now) <= 0;
+    }
+
+    return false;
 }
 
-function shouldRetryAiContent(meeting: MeetingJob) {
-    if (!meeting.recallRecordingId || !shouldAttemptAiContent(meeting)) {
+function shouldRetryAiContent(meeting: MeetingJob, now: string) {
+    if (!meeting.recallRecordingId || !shouldAttemptAiContent(meeting, now)) {
         return false;
     }
 
@@ -1293,3 +1448,15 @@ function compareIsoTimestamps(left: string, right: string) {
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === 'object');
 }
+
+
+
+
+
+
+
+
+
+
+
+

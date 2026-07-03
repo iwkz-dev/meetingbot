@@ -39,7 +39,19 @@ export type AiContentArtifactState = {
     outputTokens: number | null;
     attemptCount: number;
     lastAttemptAt: string | null;
+    nextRetryAt: string | null;
     completedAt: string | null;
+    errorCode: string | null;
+    errorMessage: string | null;
+};
+
+export type ControlPanelAiContent = {
+    kind: AiContentKind;
+    status: AiContentStatus;
+    attemptCount: number;
+    lastAttemptAt: string | null;
+    completedAt: string | null;
+    outputFilename: string | null;
     errorCode: string | null;
     errorMessage: string | null;
 };
@@ -128,6 +140,7 @@ export type ControlPanelMeeting = {
     videoUpload: DriveArtifact | null;
     transcriptJsonUpload: DriveArtifact | null;
     transcriptTextUpload: DriveArtifact | null;
+    aiContent: ControlPanelAiContent;
     lastError: string | null;
 };
 
