@@ -1,13 +1,18 @@
 import { strict as assert } from 'node:assert';
 import test from 'node:test';
-import { MeetingController, MeetingControllerError } from '../src/MeetingController';
+import {
+    buildInviteMeetingInput,
+    buildRecallCreateBotPayload,
+    MeetingController,
+    MeetingControllerError,
+} from '../src/MeetingController';
 import { MeetingStore } from '../src/MeetingStore';
 import { RecallClient } from '../src/RecallClient';
 import { createTempDir, buildConfig } from './helpers';
 
 test('MeetingController creates a Recall bot and persists joining state', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
-    const config = buildConfig({ RECALL_ON_JOIN_MESSAGE: 'Welcome everyone' });
+    const config = buildConfig();
     const store = await MeetingStore.create(await createTempDir('meetingbot-controller-'));
     const recallClient = new RecallClient(config, {
         fetchImpl: async (url, init) => {
@@ -32,6 +37,7 @@ test('MeetingController creates a Recall bot and persists joining state', async 
         meetingSubject: 'Weekly Coordination',
         botDisplayName: 'IWKZ Bot',
         meetingType: 'rapat',
+        onJoinMessage: 'Welcome everyone',
     });
 
     assert.equal(result.result, 'ok');
@@ -42,6 +48,7 @@ test('MeetingController creates a Recall bot and persists joining state', async 
     assert.equal(meetings.length, 1);
     assert.equal(meetings[0]?.status, 'joining');
     assert.equal(meetings[0]?.recallBotId, 'recall-bot-1');
+    assert.equal(meetings[0]?.onJoinMessage, 'Welcome everyone');
 
     assert.equal(requests.length, 1);
     assert.match(requests[0]?.url ?? '', /\/bot\/$/);
@@ -51,24 +58,17 @@ test('MeetingController creates a Recall bot and persists joining state', async 
     assert.equal(body.chat.on_bot_join.message, 'Welcome everyone');
 });
 
-test('MeetingController normalizes Recall activate_after to at least 1', async () => {
+test('MeetingController trims onJoinMessage before persisting and sending to Recall', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
-    const config = buildConfig({
-        RECALL_EVERYONE_LEFT_ACTIVATE_AFTER_SECONDS: '0',
-    });
-    const store = await MeetingStore.create(
-        await createTempDir('meetingbot-controller-activate-after-'),
-    );
+    const config = buildConfig();
+    const store = await MeetingStore.create(await createTempDir('meetingbot-controller-trim-'));
     const recallClient = new RecallClient(config, {
         fetchImpl: async (url, init) => {
             requests.push({ url: String(url), init });
-            return new Response(
-                JSON.stringify({ id: 'recall-bot-activate-after' }),
-                {
-                    status: 200,
-                    headers: { 'Content-Type': 'application/json' },
-                },
-            );
+            return new Response(JSON.stringify({ id: 'recall-bot-2' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
         },
         jitterMs: () => 0,
         sleep: async () => undefined,
@@ -80,10 +80,71 @@ test('MeetingController normalizes Recall activate_after to at least 1', async (
         meetingSubject: 'Weekly Coordination',
         botDisplayName: 'IWKZ Bot',
         meetingType: 'rapat',
+        onJoinMessage: '  This meeting is being recorded.  ',
     });
 
+    const meetings = await store.listNewestFirst();
+    assert.equal(meetings[0]?.onJoinMessage, 'This meeting is being recorded.');
     const body = JSON.parse(String(requests[0]?.init?.body ?? '{}'));
-    assert.equal(body.automatic_leave.everyone_left_timeout.activate_after, 1);
+    assert.equal(body.chat.on_bot_join.message, 'This meeting is being recorded.');
+});
+
+test('MeetingController omits chat when onJoinMessage is empty or invalid', async () => {
+    const config = buildConfig();
+
+    const emptyInput = buildInviteMeetingInput({
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
+        meetingSubject: 'Weekly Coordination',
+        botDisplayName: 'IWKZ Bot',
+        meetingType: 'rapat',
+        onJoinMessage: '   ',
+    });
+    assert.equal(emptyInput.onJoinMessage, '');
+
+    const invalidInput = buildInviteMeetingInput({
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
+        meetingSubject: 'Weekly Coordination',
+        botDisplayName: 'IWKZ Bot',
+        meetingType: 'rapat',
+        onJoinMessage: { text: 'hello' },
+    });
+    assert.equal(invalidInput.onJoinMessage, '');
+
+    const payload = buildRecallCreateBotPayload(
+        emptyInput,
+        'job-1',
+        config,
+        '2026-07-02T12:00:00.000Z',
+    );
+    assert.equal('chat' in payload, false);
+});
+
+test('MeetingController preserves Create Bot behavior when onJoinMessage is missing', async () => {
+    const config = buildConfig({
+        RECALL_EVERYONE_LEFT_ACTIVATE_AFTER_SECONDS: '0',
+    });
+    const input = buildInviteMeetingInput({
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
+        meetingSubject: 'Weekly Coordination',
+        botDisplayName: 'IWKZ Bot',
+        meetingType: 'rapat',
+    });
+    const payload = buildRecallCreateBotPayload(
+        input,
+        'job-legacy',
+        config,
+        '2026-07-02T12:00:00.000Z',
+    );
+
+    assert.equal(payload.meeting_url, 'https://meet.google.com/abc-defg-hij');
+    assert.equal(payload.bot_name, 'IWKZ Bot');
+    assert.deepEqual(payload.recording_config, {
+        video_mixed_mp4: {},
+        participant_events: {},
+        meeting_metadata: {},
+    });
+    assert.equal(payload.automatic_leave.everyone_left_timeout.activate_after, 1);
+    assert.equal('chat' in payload, false);
 });
 
 test('MeetingController rejects an invalid meeting type before calling Recall', async () => {
@@ -165,6 +226,7 @@ test('MeetingController leaveMeeting calls the correct Recall endpoint', async (
         meetingSubject: 'Weekly Coordination',
         botDisplayName: 'IWKZ Bot',
         meetingType: 'RAPAT',
+        onJoinMessage: '',
         status: 'joining',
     });
     await store.updateJob(job.id, (current) => ({
@@ -208,6 +270,7 @@ test('MeetingController leaveMeeting is idempotent when Recall says the bot alre
         meetingSubject: 'Weekly Coordination',
         botDisplayName: 'IWKZ Bot',
         meetingType: 'RAPAT',
+        onJoinMessage: '',
         status: 'recording',
     });
     await store.updateJob(job.id, (current) => ({

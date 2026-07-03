@@ -16,6 +16,7 @@ function buildCreateInput(meetingType: MeetingType = 'RAPAT') {
         meetingSubject: 'Weekly Coordination',
         botDisplayName: 'IWKZ Bot',
         meetingType,
+        onJoinMessage: '',
     };
 }
 
@@ -31,7 +32,10 @@ test('MeetingStore creates, updates, and reloads persisted jobs', async () => {
     const dataDir = await createTempDir();
     const store = await MeetingStore.create(dataDir);
 
-    const job = await store.createJob(buildCreateInput());
+    const job = await store.createJob({
+        ...buildCreateInput(),
+        onJoinMessage: 'This meeting is being recorded.',
+    });
     const updated = expectMeetingJob(
         await store.updateJob(job.id, (current) => ({
             ...current,
@@ -51,6 +55,7 @@ test('MeetingStore creates, updates, and reloads persisted jobs', async () => {
     const activeJobs = await reloaded.listActiveJobs();
 
     assert.equal(byId?.meetingSubject, 'Weekly Coordination');
+    assert.equal(byId?.onJoinMessage, 'This meeting is being recorded.');
     assert.equal(byRecallBotId?.id, job.id);
     assert.equal(newestFirst[0]?.id, job.id);
     assert.equal(activeJobs.length, 1);
@@ -59,6 +64,7 @@ test('MeetingStore creates, updates, and reloads persisted jobs', async () => {
     const raw = await fs.promises.readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw);
     assert.equal(parsed.length, 1);
+    assert.equal(parsed[0]?.onJoinMessage, 'This meeting is being recorded.');
 });
 
 test('MeetingStore retains active jobs while pruning old terminal records', async () => {

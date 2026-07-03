@@ -6,7 +6,7 @@
 
 The rebuilt application must:
 
-- let an operator submit a meeting URL, bot name, meeting subject, and meeting type;
+- let an operator submit a meeting URL, bot name, meeting subject, meeting type, and an optional per-meeting on-join message;
 - use Recall.ai to join and record Google Meet or Zoom meetings;
 - track the complete bot lifecycle through verified webhooks;
 - support automatic leaving and manual leave from the control panel;
@@ -121,7 +121,7 @@ sequenceDiagram
     participant Recall as Recall.ai
     participant Call as Meet / Zoom
 
-    Operator->>UI: Enter URL, bot name, subject, type
+    Operator->>UI: Enter URL, bot name, subject, type, optional on-join message
     UI->>App: POST /api/control-panel/invite
     App->>App: Validate and normalize input
     App->>Store: Create job (creating_bot)
@@ -441,5 +441,6 @@ When usage grows beyond one container, evolve the architecture in this order:
 5. Add object storage as a staging area for large media.
 6. Add user accounts, authorization, and tenant-specific Drive routing.
 7. Add scheduling and calendar integrations while retaining the same `join_at` abstraction.
+
 
 

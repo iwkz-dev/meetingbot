@@ -44,6 +44,7 @@ export class MeetingStore {
             meetingSubject: input.meetingSubject,
             botDisplayName: input.botDisplayName,
             meetingType: input.meetingType,
+            onJoinMessage: input.onJoinMessage,
             status: input.status ?? 'creating_bot',
             recallStatusCode: null,
             recallStatusSubCode: null,
@@ -185,6 +186,7 @@ export class MeetingStore {
 function normalizeMeetingJob(value: MeetingJob): MeetingJob {
     return {
         ...value,
+        onJoinMessage: typeof value.onJoinMessage === 'string' ? value.onJoinMessage : '',
         artifactProcessingMode: value.artifactProcessingMode ?? null,
         driveFolder: value.driveFolder ?? null,
         videoUpload: value.videoUpload ?? null,
@@ -193,4 +195,3 @@ function normalizeMeetingJob(value: MeetingJob): MeetingJob {
         lastError: value.lastError ?? null,
     };
 }
-

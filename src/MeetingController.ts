@@ -42,6 +42,7 @@ export class MeetingController {
         meetingTitle?: unknown;
         botDisplayName?: unknown;
         meetingType?: unknown;
+        onJoinMessage?: unknown;
     }): Promise<InviteMeetingResult> {
         const input = buildInviteMeetingInput(payload);
         const job = await this.store.createJob({
@@ -171,12 +172,14 @@ export function buildInviteMeetingInput(payload: {
     meetingTitle?: unknown;
     botDisplayName?: unknown;
     meetingType?: unknown;
+    onJoinMessage?: unknown;
 }): InviteMeetingInput {
     const meetingUrl = String(payload.meetingUrl ?? '').trim();
     const meetingSubject = String(
         payload.meetingSubject ?? payload.meetingTitle ?? '',
     ).trim();
     const botDisplayName = String(payload.botDisplayName ?? '').trim() || 'IWKZ Bot';
+    const onJoinMessage = normalizeOnJoinMessage(payload.onJoinMessage);
 
     let meetingType: InviteMeetingInput['meetingType'];
     try {
@@ -226,6 +229,7 @@ export function buildInviteMeetingInput(payload: {
         meetingSubject,
         botDisplayName,
         meetingType,
+        onJoinMessage,
     };
 }
 
@@ -260,7 +264,7 @@ export function buildArtifactBaseName(subject: string) {
     return sanitizeFilenameBaseName(subject);
 }
 
-function buildRecallCreateBotPayload(
+export function buildRecallCreateBotPayload(
     input: InviteMeetingInput,
     jobId: string,
     config: AppConfig,
@@ -292,11 +296,11 @@ function buildRecallCreateBotPayload(
         },
     };
 
-    if (config.recallOnJoinMessage.trim()) {
+    if (input.onJoinMessage) {
         payload.chat = {
             on_bot_join: {
                 send_to: 'everyone',
-                message: config.recallOnJoinMessage,
+                message: input.onJoinMessage,
                 pin: true,
             },
         };
@@ -379,8 +383,14 @@ function expectString(value: string | null, message: string) {
     return value;
 }
 
-
 function normalizeRecallActivateAfterSeconds(value: number) {
     return Math.max(1, value);
 }
 
+function normalizeOnJoinMessage(value: unknown) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    return value.trim();
+}

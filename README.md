@@ -113,7 +113,6 @@ RECALL_WAITING_ROOM_TIMEOUT_SECONDS=1200
 RECALL_NOONE_JOINED_TIMEOUT_SECONDS=1200
 RECALL_EVERYONE_LEFT_TIMEOUT_SECONDS=15
 RECALL_EVERYONE_LEFT_ACTIVATE_AFTER_SECONDS=0
-RECALL_ON_JOIN_MESSAGE=This meeting is being recorded.
 
 GDRIVE_CLIENT_ID=
 GDRIVE_CLIENT_SECRET=
@@ -209,6 +208,7 @@ The current Recall build does not require browser or media-capture runtime depen
    - Meeting Subject
    - Bot Name
    - Meeting Type (`seminar` or `rapat`)
+   - Optional On-join Message (`empty` means no automatic join message)
 4. Wait for the Recall bot lifecycle to update.
 5. Use **Leave Meeting** if you need to stop a live bot.
 6. Open the uploaded Drive links after processing completes.
@@ -226,7 +226,8 @@ Request body:
   "meetingUrl": "https://meet.google.com/abc-defg-hij",
   "meetingSubject": "Weekly Sync",
   "botDisplayName": "IWKZ Bot",
-  "meetingType": "seminar"
+  "meetingType": "seminar",
+  "onJoinMessage": "This meeting is being recorded."
 }
 ```
 
@@ -311,3 +312,4 @@ rg -n "playwright|puppeteer|ffmpeg|xvfb|pulseaudio|HandlerGMeet|HandlerZoom|CHRO
 ```
 
 Those strings should not appear in runtime app code for the Recall-only architecture.
+

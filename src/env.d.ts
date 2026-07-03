@@ -1,10 +1,10 @@
 declare namespace NodeJS {
     interface ProcessEnv {
         PORT?: string;
-        NODE_ENV?: 'development' | 'production' | 'test';
+        NODE_ENV?: string;
         CONTROL_PANEL_PASSWORD?: string;
         DATA_DIR?: string;
-        RECALL_REGION?: 'us-west-2' | 'us-east-1' | 'eu-central-1' | 'ap-northeast-1';
+        RECALL_REGION?: string;
         RECALL_API_KEY?: string;
         RECALL_WORKSPACE_VERIFICATION_SECRET?: string;
         RECALL_SVIX_WEBHOOK_SECRET?: string;
@@ -13,7 +13,6 @@ declare namespace NodeJS {
         RECALL_NOONE_JOINED_TIMEOUT_SECONDS?: string;
         RECALL_EVERYONE_LEFT_TIMEOUT_SECONDS?: string;
         RECALL_EVERYONE_LEFT_ACTIVATE_AFTER_SECONDS?: string;
-        RECALL_ON_JOIN_MESSAGE?: string;
         GDRIVE_CLIENT_ID?: string;
         GDRIVE_CLIENT_SECRET?: string;
         GDRIVE_REFRESH_TOKEN?: string;

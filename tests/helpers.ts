@@ -20,7 +20,6 @@ export function buildValidEnv(
         RECALL_NOONE_JOINED_TIMEOUT_SECONDS: '1200',
         RECALL_EVERYONE_LEFT_TIMEOUT_SECONDS: '15',
         RECALL_EVERYONE_LEFT_ACTIVATE_AFTER_SECONDS: '0',
-        RECALL_ON_JOIN_MESSAGE: '',
         GDRIVE_CLIENT_ID: 'client-id',
         GDRIVE_CLIENT_SECRET: 'client-secret',
         GDRIVE_REFRESH_TOKEN: 'refresh-token',

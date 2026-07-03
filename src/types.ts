@@ -36,6 +36,7 @@ export type MeetingJob = {
     meetingSubject: string;
     botDisplayName: string;
     meetingType: MeetingType;
+    onJoinMessage: string;
     status: MeetingJobStatus;
     recallStatusCode: string | null;
     recallStatusSubCode: string | null;
@@ -60,6 +61,7 @@ export type MeetingJobCreateInput = {
     meetingSubject: string;
     botDisplayName: string;
     meetingType: MeetingType;
+    onJoinMessage: string;
     status?: MeetingJobStatus;
 };
 
@@ -98,6 +100,7 @@ export type InviteMeetingInput = {
     meetingSubject: string;
     botDisplayName: string;
     meetingType: MeetingType;
+    onJoinMessage: string;
 };
 
 export type InviteMeetingResult = {
@@ -168,4 +171,3 @@ export type RecallCreateBotPayload = {
 export type RecallBotResponse = {
     id: string;
 };
-

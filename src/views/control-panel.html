@@ -53,8 +53,9 @@
             .stat strong { display: block; margin-top: 6px; font-size: 1.05rem; }
             form { display: grid; gap: 14px; }
             label { display: block; margin-bottom: 6px; font-weight: 600; }
-            input, select, button { width: 100%; border-radius: 12px; font: inherit; }
-            input, select { padding: 12px 14px; border: 1px solid var(--line); background: white; color: var(--text); }
+            input, select, textarea, button { width: 100%; border-radius: 12px; font: inherit; }
+            input, select, textarea { padding: 12px 14px; border: 1px solid var(--line); background: white; color: var(--text); }
+            textarea { min-height: 104px; resize: vertical; }
             button { padding: 12px 16px; border: none; cursor: pointer; color: white; background: var(--accent); font-weight: 600; }
             button.secondary { background: #8d7d66; }
             button.leave { background: var(--danger); }
@@ -119,6 +120,10 @@
                                 <option value="rapat">Rapat</option>
                             </select>
                         </div>
+                        <div>
+                            <label for="onJoinMessage">On-join Message</label>
+                            <textarea id="onJoinMessage" name="onJoinMessage" placeholder="This meeting is being recorded."></textarea>
+                        </div>
                         <button type="submit">Start Bot</button>
                     </form>
                     <p class="notice" id="invite-notice"></p>
@@ -181,6 +186,7 @@
 
                 return labels[status] || status;
             }
+
             async function fetchState() {
                 const response = await fetch('/api/control-panel/state', { credentials: 'same-origin' });
                 if (response.status === 401) {
@@ -286,6 +292,9 @@
 
                 inviteNotice.className = response.ok ? 'notice' : 'notice error';
                 inviteNotice.textContent = result.message || 'Request failed.';
+                if (response.ok) {
+                    inviteForm.reset();
+                }
                 await fetchState().catch(() => {});
             });
 
@@ -294,6 +303,3 @@
         </script>
     </body>
 </html>
-
-
-

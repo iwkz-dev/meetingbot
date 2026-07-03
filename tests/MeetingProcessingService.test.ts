@@ -158,6 +158,7 @@ async function createHarness(options: {
         meetingSubject: 'HelloWorld',
         botDisplayName: 'IWKZ Bot',
         meetingType: options.meetingType ?? 'SEMINAR',
+        onJoinMessage: '',
         status: 'uploading',
     });
 
@@ -361,4 +362,5 @@ test('buildControlPanelState exposes artifact links and hides processing interna
     assert.equal(state.meetings[0]?.videoUpload?.link?.startsWith('https://drive.example/files/'), true);
     assert.equal('artifactProcessingMode' in (state.meetings[0] ?? {}), false);
 });
+
 

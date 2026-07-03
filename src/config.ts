@@ -19,7 +19,6 @@ export type AppConfig = {
     recallSvixWebhookSecret: string;
     publicApiBaseUrl: string;
     recallAutomaticLeave: RecallAutomaticLeaveConfig;
-    recallOnJoinMessage: string;
     gdriveClientId: string;
     gdriveClientSecret: string;
     gdriveRefreshToken: string;
@@ -74,7 +73,6 @@ export function createConfig(
         'RECALL_WORKSPACE_VERIFICATION_SECRET',
     );
     const recallSvixWebhookSecret = optional('RECALL_SVIX_WEBHOOK_SECRET');
-    const recallOnJoinMessage = optional('RECALL_ON_JOIN_MESSAGE');
     const gdriveClientId = required('GDRIVE_CLIENT_ID');
     const gdriveClientSecret = required('GDRIVE_CLIENT_SECRET');
     const gdriveRefreshToken = required('GDRIVE_REFRESH_TOKEN');
@@ -124,7 +122,6 @@ export function createConfig(
                 0,
             ),
         },
-        recallOnJoinMessage,
         gdriveClientId,
         gdriveClientSecret,
         gdriveRefreshToken,

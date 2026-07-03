@@ -83,6 +83,7 @@ async function seedMeeting(serviceState: Awaited<ReturnType<typeof createService
         meetingSubject: 'Weekly Coordination',
         botDisplayName: 'IWKZ Bot',
         meetingType: 'RAPAT',
+        onJoinMessage: '',
         status: 'joining',
     });
 
@@ -360,5 +361,6 @@ test('transcript.failed keeps uploading state and requests video-only processing
         videoOnly: true,
     });
 });
+
 
 
