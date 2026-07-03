@@ -61,6 +61,12 @@ export class MeetingStore {
             videoUpload: null,
             transcriptJsonUpload: null,
             transcriptTextUpload: null,
+            participantJsonUpload: null,
+            participantTextUpload: null,
+            participantArtifactStatus: null,
+            participantArtifactError: null,
+            participantArtifactAttempts: 0,
+            participantArtifactNextRetryAt: null,
             lastError: null,
         };
 
@@ -192,6 +198,17 @@ function normalizeMeetingJob(value: MeetingJob): MeetingJob {
         videoUpload: value.videoUpload ?? null,
         transcriptJsonUpload: value.transcriptJsonUpload ?? null,
         transcriptTextUpload: value.transcriptTextUpload ?? null,
+        participantJsonUpload: value.participantJsonUpload ?? null,
+        participantTextUpload: value.participantTextUpload ?? null,
+        participantArtifactStatus: value.participantArtifactStatus ?? null,
+        participantArtifactError: value.participantArtifactError ?? null,
+        participantArtifactAttempts:
+            typeof value.participantArtifactAttempts === 'number' &&
+            Number.isFinite(value.participantArtifactAttempts) &&
+            value.participantArtifactAttempts >= 0
+                ? value.participantArtifactAttempts
+                : 0,
+        participantArtifactNextRetryAt: value.participantArtifactNextRetryAt ?? null,
         lastError: value.lastError ?? null,
     };
 }

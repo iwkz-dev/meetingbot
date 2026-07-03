@@ -8,10 +8,18 @@ import { ensureMeetingFolder, uploadFileToGDrive } from './GDriveUploader';
 import { MeetingStore } from './MeetingStore';
 import { RecallClient } from './RecallClient';
 import { sanitizeFilenameBaseName } from './filename';
-import { DriveArtifact, DriveFolder, MeetingJob } from './types';
+import {
+    DriveArtifact,
+    DriveFolder,
+    MeetingJob,
+    MeetingParticipant,
+    ParticipantArtifactStatus,
+} from './types';
 
 const DOWNLOAD_TIMEOUT_MS = 120000;
 const MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024;
+const MAX_PARTICIPANT_BYTES = 10 * 1024 * 1024;
+const PARTICIPANT_RETRY_DELAYS_MS = [60000, 300000, 900000, 1800000, 3600000];
 
 type FetchLike = typeof fetch;
 
@@ -87,11 +95,13 @@ export class MeetingProcessingService {
 
     async resumeInterruptedJobs() {
         const meetings = await this.store.listNewestFirst();
+        const now = this.now();
         const requeueable = meetings.filter(
             (meeting) =>
-                meeting.status === 'uploading' &&
-                Boolean(meeting.recallRecordingId) &&
-                hasMissingRequiredArtifacts(meeting),
+                (meeting.status === 'uploading' &&
+                    Boolean(meeting.recallRecordingId) &&
+                    hasMissingRequiredArtifacts(meeting)) ||
+                shouldRetryParticipantArtifacts(meeting, now),
         );
 
         await Promise.all(
@@ -170,76 +180,33 @@ export class MeetingProcessingService {
             const driveFolder = await this.ensurePersistedDriveFolder(meeting);
             meeting = (await this.store.getById(meeting.id)) ?? meeting;
 
-            if (!meeting.videoUpload) {
-                await downloadFileToPath(this.fetchImpl, videoDownloadUrl, videoPath);
-                const uploadedVideo = await this.gdriveClient.uploadFile(
-                    path.basename(videoPath),
-                    videoPath,
-                    driveFolder.id,
-                );
-                meeting = await this.persistArtifact(
-                    meeting.id,
-                    'videoUpload',
-                    uploadedVideo,
-                );
-            }
+            await this.processVideoArtifact(
+                meeting,
+                driveFolder,
+                videoDownloadUrl,
+                videoPath,
+                errors,
+            );
+            meeting = (await this.store.getById(meeting.id)) ?? meeting;
 
-            if (!videoOnly && needsTranscriptArtifacts(meeting)) {
-                const transcriptDownloadUrl = await this.resolveTranscriptDownloadUrl(
+            if (!videoOnly) {
+                await this.processTranscriptArtifacts(
                     meeting,
+                    driveFolder,
                     recording,
-                );
-                if (!transcriptDownloadUrl) {
-                    throw new Error(
-                        'Recall transcript metadata did not include a usable download URL.',
-                    );
-                }
-
-                const transcriptJsonText = await downloadTextWithLimit(
-                    this.fetchImpl,
-                    transcriptDownloadUrl,
-                    MAX_TRANSCRIPT_BYTES,
-                );
-                const transcriptPayload = parseTranscriptJson(transcriptJsonText);
-                await fs.promises.writeFile(
                     transcriptJsonPath,
-                    transcriptJsonText,
-                    'utf8',
-                );
-                await fs.promises.writeFile(
                     transcriptTextPath,
-                    formatTranscriptText(transcriptPayload),
-                    'utf8',
+                    errors,
                 );
-
                 meeting = (await this.store.getById(meeting.id)) ?? meeting;
-
-                if (!meeting.transcriptJsonUpload) {
-                    const uploadedJson = await this.gdriveClient.uploadFile(
-                        path.basename(transcriptJsonPath),
-                        transcriptJsonPath,
-                        driveFolder.id,
-                    );
-                    meeting = await this.persistArtifact(
-                        meeting.id,
-                        'transcriptJsonUpload',
-                        uploadedJson,
-                    );
-                }
-
-                if (!meeting.transcriptTextUpload) {
-                    const uploadedText = await this.gdriveClient.uploadFile(
-                        path.basename(transcriptTextPath),
-                        transcriptTextPath,
-                        driveFolder.id,
-                    );
-                    meeting = await this.persistArtifact(
-                        meeting.id,
-                        'transcriptTextUpload',
-                        uploadedText,
-                    );
-                }
             }
+
+            await this.processParticipantArtifacts(
+                meeting,
+                driveFolder,
+                baseName,
+                tempDir,
+            );
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             errors.push(message);
@@ -253,6 +220,234 @@ export class MeetingProcessingService {
         }
 
         await this.finalizeMeeting(meetingId, videoOnly, errors);
+    }
+
+    private async processVideoArtifact(
+        meeting: MeetingJob,
+        driveFolder: DriveFolder,
+        videoDownloadUrl: string,
+        videoPath: string,
+        errors: string[],
+    ) {
+        if (meeting.videoUpload) {
+            return;
+        }
+
+        try {
+            await downloadFileToPath(this.fetchImpl, videoDownloadUrl, videoPath);
+            const uploadedVideo = await this.gdriveClient.uploadFile(
+                path.basename(videoPath),
+                videoPath,
+                driveFolder.id,
+            );
+            await this.persistArtifact(
+                meeting.id,
+                'videoUpload',
+                uploadedVideo,
+            );
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(message);
+            this.logger.error('Meeting video artifact processing failed', {
+                meetingId: meeting.id,
+                error: message,
+            });
+        }
+    }
+
+    private async processTranscriptArtifacts(
+        meeting: MeetingJob,
+        driveFolder: DriveFolder,
+        recording: unknown,
+        transcriptJsonPath: string,
+        transcriptTextPath: string,
+        errors: string[],
+    ) {
+        if (!needsTranscriptArtifacts(meeting)) {
+            return;
+        }
+
+        try {
+            const transcriptDownloadUrl = await this.resolveTranscriptDownloadUrl(
+                meeting,
+                recording,
+            );
+            if (!transcriptDownloadUrl) {
+                throw new Error(
+                    'Recall transcript metadata did not include a usable download URL.',
+                );
+            }
+
+            const transcriptJsonText = await downloadTextWithLimit(
+                this.fetchImpl,
+                transcriptDownloadUrl,
+                MAX_TRANSCRIPT_BYTES,
+            );
+            const transcriptPayload = parseTranscriptJson(transcriptJsonText);
+            await fs.promises.writeFile(
+                transcriptJsonPath,
+                transcriptJsonText,
+                'utf8',
+            );
+            await fs.promises.writeFile(
+                transcriptTextPath,
+                formatTranscriptText(transcriptPayload),
+                'utf8',
+            );
+
+            const currentMeeting = (await this.store.getById(meeting.id)) ?? meeting;
+
+            if (!currentMeeting.transcriptJsonUpload) {
+                const uploadedJson = await this.gdriveClient.uploadFile(
+                    path.basename(transcriptJsonPath),
+                    transcriptJsonPath,
+                    driveFolder.id,
+                );
+                await this.persistArtifact(
+                    meeting.id,
+                    'transcriptJsonUpload',
+                    uploadedJson,
+                );
+            }
+
+            const refreshedMeeting = (await this.store.getById(meeting.id)) ?? currentMeeting;
+            if (!refreshedMeeting.transcriptTextUpload) {
+                const uploadedText = await this.gdriveClient.uploadFile(
+                    path.basename(transcriptTextPath),
+                    transcriptTextPath,
+                    driveFolder.id,
+                );
+                await this.persistArtifact(
+                    meeting.id,
+                    'transcriptTextUpload',
+                    uploadedText,
+                );
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(message);
+            this.logger.error('Meeting transcript artifact processing failed', {
+                meetingId: meeting.id,
+                error: message,
+            });
+        }
+    }
+
+    private async processParticipantArtifacts(
+        meeting: MeetingJob,
+        driveFolder: DriveFolder,
+        baseName: string,
+        tempDir: string,
+    ) {
+        const currentMeeting = (await this.store.getById(meeting.id)) ?? meeting;
+        if (!shouldAttemptParticipantArtifacts(currentMeeting, this.now())) {
+            return;
+        }
+
+        const startedMeeting = await this.store.updateJob(meeting.id, (current) => {
+            if (!shouldAttemptParticipantArtifacts(current, this.now())) {
+                return current;
+            }
+
+            return {
+                ...current,
+                participantArtifactStatus: 'processing',
+                participantArtifactError: null,
+                participantArtifactAttempts: current.participantArtifactAttempts + 1,
+            };
+        });
+
+        const processingMeeting = startedMeeting ?? currentMeeting;
+        if (processingMeeting.participantArtifactStatus !== 'processing') {
+            return;
+        }
+
+        try {
+            if (!processingMeeting.recallBotId) {
+                throw new Error('No Recall bot ID is available for participant artifact processing.');
+            }
+
+            const bot = await this.recallClient.getBot(processingMeeting.recallBotId);
+            const participantsDownloadUrl = await this.resolveParticipantsDownloadUrl(
+                processingMeeting,
+                bot,
+            );
+
+            if (!participantsDownloadUrl) {
+                await this.persistParticipantArtifactState(
+                    meeting.id,
+                    'pending',
+                    'Recall participant metadata did not include a usable participants download URL.',
+                    true,
+                );
+                return;
+            }
+
+            const participantsJsonText = await downloadTextWithLimit(
+                this.fetchImpl,
+                participantsDownloadUrl,
+                MAX_PARTICIPANT_BYTES,
+            );
+            const participants = parseParticipantsJson(participantsJsonText);
+            const participantJsonPath = path.join(
+                tempDir,
+                `${baseName}.participants.json`,
+            );
+            const participantTextPath = path.join(
+                tempDir,
+                `${baseName}.participants.txt`,
+            );
+
+            await fs.promises.writeFile(
+                participantJsonPath,
+                JSON.stringify(participants, null, 2),
+                'utf8',
+            );
+            await fs.promises.writeFile(
+                participantTextPath,
+                formatParticipantNamesText(
+                    participants,
+                    processingMeeting.botDisplayName,
+                ),
+                'utf8',
+            );
+
+            let refreshed = (await this.store.getById(meeting.id)) ?? processingMeeting;
+            if (!refreshed.participantJsonUpload) {
+                const uploadedJson = await this.gdriveClient.uploadFile(
+                    path.basename(participantJsonPath),
+                    participantJsonPath,
+                    driveFolder.id,
+                );
+                refreshed = await this.persistArtifact(
+                    meeting.id,
+                    'participantJsonUpload',
+                    uploadedJson,
+                );
+            }
+
+            if (!refreshed.participantTextUpload) {
+                const uploadedText = await this.gdriveClient.uploadFile(
+                    path.basename(participantTextPath),
+                    participantTextPath,
+                    driveFolder.id,
+                );
+                refreshed = await this.persistArtifact(
+                    meeting.id,
+                    'participantTextUpload',
+                    uploadedText,
+                );
+            }
+
+            await this.persistParticipantArtifactState(meeting.id, 'done', null, false);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await this.persistParticipantArtifactState(meeting.id, 'failed', message, false);
+            this.logger.error('Meeting participant artifact processing failed', {
+                meetingId: meeting.id,
+                error: message,
+            });
+        }
     }
 
     private async updateMeetingForProcessing(
@@ -297,6 +492,26 @@ export class MeetingProcessingService {
         return getDownloadUrl(transcript, ['data', 'download_url']);
     }
 
+    private async resolveParticipantsDownloadUrl(
+        meeting: MeetingJob,
+        bot: unknown,
+    ) {
+        const botRecording = findBotRecording(bot, meeting.recallRecordingId);
+        const shortcutUrl = getParticipantsDownloadUrl(botRecording);
+        if (shortcutUrl) {
+            return shortcutUrl;
+        }
+
+        if (!meeting.recallRecordingId) {
+            return null;
+        }
+
+        const participantEvents = await this.recallClient.listParticipantEvents(
+            meeting.recallRecordingId,
+        );
+        return getParticipantsDownloadUrlFromParticipantEvents(participantEvents);
+    }
+
     private async ensurePersistedDriveFolder(
         meeting: MeetingJob,
     ): Promise<DriveFolder> {
@@ -321,7 +536,12 @@ export class MeetingProcessingService {
 
     private async persistArtifact(
         meetingId: string,
-        field: 'videoUpload' | 'transcriptJsonUpload' | 'transcriptTextUpload',
+        field:
+            | 'videoUpload'
+            | 'transcriptJsonUpload'
+            | 'transcriptTextUpload'
+            | 'participantJsonUpload'
+            | 'participantTextUpload',
         artifact: DriveArtifact,
     ): Promise<MeetingJob> {
         const updated: MeetingJob | null = await this.store.updateJob(meetingId, (current) => ({
@@ -336,20 +556,46 @@ export class MeetingProcessingService {
         return updated;
     }
 
+    private async persistParticipantArtifactState(
+        meetingId: string,
+        status: ParticipantArtifactStatus,
+        errorMessage: string | null,
+        retryable: boolean,
+    ) {
+        await this.store.updateJob(meetingId, (current) => ({
+            ...current,
+            participantArtifactStatus: status,
+            participantArtifactError: errorMessage,
+            participantArtifactNextRetryAt:
+                retryable && status === 'pending'
+                    ? addDelayToIso(
+                          this.now(),
+                          getParticipantRetryDelayMs(current.participantArtifactAttempts),
+                      )
+                    : null,
+        }));
+    }
+
     private async finalizeMeeting(
         meetingId: string,
         videoOnly: boolean,
         errors: string[],
     ) {
         const updated = await this.store.updateJob(meetingId, (current) => {
-            const mergedError = mergeErrorMessages(current.lastError, errors);
+            const participantIncomplete = !hasCompletedParticipantArtifacts(current);
+            const mergedError = mergeErrorMessages(current.lastError, [
+                ...errors,
+                current.participantArtifactError,
+            ]);
             const hasVideo = Boolean(current.videoUpload);
             const hasTranscriptJson = Boolean(current.transcriptJsonUpload);
             const hasTranscriptText = Boolean(current.transcriptTextUpload);
             const transcriptComplete =
                 videoOnly || (hasTranscriptJson && hasTranscriptText);
             const hasProcessingErrors =
-                errors.length > 0 || (videoOnly && Boolean(current.lastError));
+                errors.length > 0 ||
+                (videoOnly && Boolean(current.lastError)) ||
+                participantIncomplete;
 
             let status: MeetingJob['status'];
             if (!hasVideo) {
@@ -424,6 +670,46 @@ export function formatTranscriptText(payload: unknown) {
             return prefix.trim();
         })
         .join('\n\n');
+}
+
+export function collectParticipantNames(
+    participants: unknown,
+    botDisplayName: string,
+) {
+    const normalizedBotName = normalizeParticipantName(botDisplayName);
+    const seen = new Set<string>();
+    const names: string[] = [];
+
+    for (const participant of ensureParticipantArray(participants)) {
+        const normalizedName = normalizeParticipantName(participant.name);
+        if (!normalizedName) {
+            continue;
+        }
+
+        if (normalizedBotName && normalizedName.toLocaleLowerCase() === normalizedBotName.toLocaleLowerCase()) {
+            continue;
+        }
+
+        const key = normalizedName.toLocaleLowerCase();
+        if (seen.has(key)) {
+            continue;
+        }
+
+        seen.add(key);
+        names.push(normalizedName);
+    }
+
+    return names.sort((left, right) =>
+        left.localeCompare(right, undefined, { sensitivity: 'base' }),
+    );
+}
+
+export function formatParticipantNamesText(
+    participants: unknown,
+    botDisplayName: string,
+) {
+    const names = collectParticipantNames(participants, botDisplayName);
+    return names.length ? `${names.join('\n')}\n` : '';
 }
 
 function buildTranscriptBlocks(payload: unknown) {
@@ -550,7 +836,7 @@ function joinTranscriptWords(words: string[]) {
             continue;
         }
 
-        if (/^['’]/.test(word) && /[A-Za-z0-9]$/.test(result)) {
+        if (/^['']/.test(word) && /[A-Za-z0-9]$/.test(result)) {
             result += word;
             continue;
         }
@@ -616,6 +902,37 @@ function parseTranscriptJson(value: string) {
     } catch {
         throw new Error('Recall transcript download did not return valid JSON.');
     }
+}
+
+function parseParticipantsJson(value: string) {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(value);
+    } catch {
+        throw new Error('Recall participants download did not return valid JSON.');
+    }
+
+    return ensureParticipantArray(parsed);
+}
+
+function ensureParticipantArray(value: unknown): MeetingParticipant[] {
+    if (!Array.isArray(value)) {
+        throw new Error('Recall participants download did not return a JSON array.');
+    }
+
+    return value.map((item) => normalizeParticipant(item));
+}
+
+function normalizeParticipant(value: unknown): MeetingParticipant {
+    const item = isRecord(value) ? value : {};
+    return {
+        id: typeof item.id === 'number' && Number.isFinite(item.id) ? item.id : -1,
+        name: typeof item.name === 'string' ? item.name : null,
+        is_host: typeof item.is_host === 'boolean' ? item.is_host : null,
+        platform: typeof item.platform === 'string' ? item.platform : null,
+        extra_data: 'extra_data' in item ? item.extra_data ?? null : null,
+        email: typeof item.email === 'string' ? item.email : null,
+    };
 }
 
 async function downloadFileToPath(
@@ -707,10 +1024,18 @@ function hasMissingRequiredArtifacts(meeting: MeetingJob) {
     }
 
     if (meeting.artifactProcessingMode === 'video_only') {
-        return false;
+        return hasMissingParticipantArtifacts(meeting);
     }
 
-    return !meeting.transcriptJsonUpload || !meeting.transcriptTextUpload;
+    return (
+        !meeting.transcriptJsonUpload ||
+        !meeting.transcriptTextUpload ||
+        hasMissingParticipantArtifacts(meeting)
+    );
+}
+
+function hasMissingParticipantArtifacts(meeting: MeetingJob) {
+    return !meeting.participantJsonUpload || !meeting.participantTextUpload;
 }
 
 function needsTranscriptArtifacts(meeting: MeetingJob) {
@@ -720,11 +1045,53 @@ function needsTranscriptArtifacts(meeting: MeetingJob) {
 function isFullyProcessed(meeting: MeetingJob, videoOnly: boolean) {
     return Boolean(
         meeting.videoUpload &&
+            hasCompletedParticipantArtifacts(meeting) &&
             (videoOnly || (meeting.transcriptJsonUpload && meeting.transcriptTextUpload)),
     );
 }
 
-function mergeErrorMessages(existing: string | null, errors: string[]) {
+function hasCompletedParticipantArtifacts(meeting: MeetingJob) {
+    return Boolean(
+        meeting.participantJsonUpload &&
+            meeting.participantTextUpload &&
+            meeting.participantArtifactStatus === 'done',
+    );
+}
+
+function shouldAttemptParticipantArtifacts(meeting: MeetingJob, now: string) {
+    if (hasCompletedParticipantArtifacts(meeting)) {
+        return false;
+    }
+
+    if (meeting.participantArtifactStatus === 'processing') {
+        return true;
+    }
+
+    if (meeting.participantArtifactStatus === 'pending') {
+        if (!meeting.participantArtifactNextRetryAt) {
+            return true;
+        }
+
+        return compareIsoTimestamps(meeting.participantArtifactNextRetryAt, now) <= 0;
+    }
+
+    return meeting.participantArtifactStatus !== 'failed';
+}
+
+function shouldRetryParticipantArtifacts(meeting: MeetingJob, now: string) {
+    return Boolean(
+        meeting.recallRecordingId &&
+            meeting.recallBotId &&
+            (meeting.status === 'uploading' ||
+                meeting.status === 'completed' ||
+                meeting.status === 'completed_with_errors') &&
+            (meeting.participantArtifactStatus === 'processing' ||
+                (meeting.participantArtifactStatus === 'pending' &&
+                    shouldAttemptParticipantArtifacts(meeting, now))),
+    );
+}
+
+function mergeErrorMessages(existing: string | null, errors: Array<string | null>) {
     const values = [existing, ...errors]
         .filter((value): value is string => Boolean(value && value.trim()))
         .map((value) => value.trim());
@@ -736,10 +1103,88 @@ function mergeErrorMessages(existing: string | null, errors: string[]) {
     return [...new Set(values)].join(' | ');
 }
 
+function findBotRecording(bot: unknown, recordingId: string | null) {
+    if (!recordingId || !isRecord(bot) || !Array.isArray(bot.recordings)) {
+        return null;
+    }
+
+    for (const item of bot.recordings) {
+        if (!isRecord(item)) {
+            continue;
+        }
+
+        const itemId = typeof item.id === 'string' ? item.id.trim() : '';
+        if (itemId && itemId === recordingId) {
+            return item;
+        }
+    }
+
+    return null;
+}
+
+function getParticipantsDownloadUrl(recording: unknown) {
+    return (
+        getDownloadUrl(recording, [
+            'media_shortcuts',
+            'participant_events',
+            'data',
+            'participants_download_url',
+        ]) ??
+        getDownloadUrl(recording, [
+            'participant_events',
+            'data',
+            'participants_download_url',
+        ])
+    );
+}
+
+function getParticipantsDownloadUrlFromParticipantEvents(payload: unknown) {
+    if (!isRecord(payload) || !Array.isArray(payload.results)) {
+        return null;
+    }
+
+    for (const item of payload.results) {
+        const url = getDownloadUrl(item, ['data', 'participants_download_url']);
+        if (url) {
+            return url;
+        }
+    }
+
+    return null;
+}
+
+function normalizeParticipantName(value: unknown) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    return value.trim().replace(/\s+/g, ' ');
+}
+
+function getParticipantRetryDelayMs(attempts: number) {
+    const index = Math.max(0, Math.min(PARTICIPANT_RETRY_DELAYS_MS.length - 1, attempts - 1));
+    return PARTICIPANT_RETRY_DELAYS_MS[index] ?? PARTICIPANT_RETRY_DELAYS_MS[PARTICIPANT_RETRY_DELAYS_MS.length - 1] ?? 60000;
+}
+
+function addDelayToIso(baseIso: string, delayMs: number) {
+    const baseTime = Date.parse(baseIso);
+    if (Number.isNaN(baseTime)) {
+        return null;
+    }
+
+    return new Date(baseTime + delayMs).toISOString();
+}
+
+function compareIsoTimestamps(left: string, right: string) {
+    const leftTime = Date.parse(left);
+    const rightTime = Date.parse(right);
+    if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
+        return 0;
+    }
+
+    return leftTime - rightTime;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === 'object');
 }
-
-
-
-

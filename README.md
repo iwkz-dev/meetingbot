@@ -1,6 +1,6 @@
 # IWKZ MeetingBot - Recall.ai Edition
 
-IWKZ MeetingBot is a TypeScript/Express app that creates a Recall.ai bot for a Google Meet or Zoom meeting, tracks the bot lifecycle through verified webhooks, downloads the final MP4 and transcript after the call, and uploads those artifacts into a per-meeting Google Drive folder.
+IWKZ MeetingBot is a TypeScript/Express app that creates a Recall.ai bot for a Google Meet or Zoom meeting, tracks the bot lifecycle through verified webhooks, downloads the final MP4, transcript, and participant artifacts after the call, and uploads those artifacts into a per-meeting Google Drive folder.
 
 The app does not join meetings with a local browser anymore. It no longer depends on Playwright, Puppeteer, Xvfb, PulseAudio, FFmpeg, `HandlerGMeet`, `HandlerZoom`, or `CHROME_PATH`.
 
@@ -20,7 +20,7 @@ The app does not join meetings with a local browser anymore. It no longer depend
 - Persistent meeting job store under `DATA_DIR`.
 - Verified Recall webhook endpoint at `/api/recall/webhook`.
 - Manual leave action from the control panel.
-- Recall recording -> transcript -> Google Drive processing pipeline.
+- Recall recording -> transcript/participant artifacts -> Google Drive processing pipeline.
 - Deterministic artifact filenames.
 - Per-meeting Google Drive folder creation and reuse on retries.
 - Restart-safe upload recovery for interrupted `uploading` jobs.
@@ -60,6 +60,8 @@ Artifacts:
 <base>.mp4
 <base>.transcript.json
 <base>.transcript.txt
+<base>.participants.json
+<base>.participants.txt
 ```
 
 Drive folder name:
@@ -89,7 +91,7 @@ Example:
 2. Meeting type: `SEMINAR`
 3. Parent folder: `GDRIVE_FOLDER_SEMINAR`
 4. Created subfolder: `HelloWorld_2026-07-02`
-5. Uploaded files: MP4, transcript JSON, transcript TXT
+5. Uploaded files: MP4, transcript JSON, transcript TXT, participants JSON, participants TXT
 
 No audio-only file is generated or uploaded.
 
@@ -312,4 +314,6 @@ rg -n "playwright|puppeteer|ffmpeg|xvfb|pulseaudio|HandlerGMeet|HandlerZoom|CHRO
 ```
 
 Those strings should not appear in runtime app code for the Recall-only architecture.
+
+
 

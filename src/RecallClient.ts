@@ -127,6 +127,10 @@ export class RecallClient {
         });
     }
 
+    async getBot(recallBotId: string) {
+        return this.request(`/bot/${encodeURIComponent(recallBotId)}/`);
+    }
+
     async getRecording(recallRecordingId: string) {
         return this.request(`/recording/${encodeURIComponent(recallRecordingId)}/`);
     }
@@ -142,6 +146,12 @@ export class RecallClient {
                 method: 'POST',
                 body: payload,
             },
+        );
+    }
+
+    async listParticipantEvents(recallRecordingId: string) {
+        return this.request(
+            `/participant_events/?recording_id=${encodeURIComponent(recallRecordingId)}`,
         );
     }
 

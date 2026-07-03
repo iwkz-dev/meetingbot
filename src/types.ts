@@ -15,6 +15,8 @@ export type MeetingJobStatus =
     | 'completed_with_errors'
     | 'failed';
 
+export type ParticipantArtifactStatus = 'pending' | 'processing' | 'done' | 'failed';
+
 export type DriveArtifact = {
     id: string;
     name: string;
@@ -25,6 +27,15 @@ export type DriveFolder = {
     id: string;
     name: string;
     link: string | null;
+};
+
+export type MeetingParticipant = {
+    id: number;
+    name: string | null;
+    is_host: boolean | null;
+    platform: string | null;
+    extra_data: unknown | null;
+    email: string | null;
 };
 
 export type MeetingJob = {
@@ -53,6 +64,12 @@ export type MeetingJob = {
     videoUpload: DriveArtifact | null;
     transcriptJsonUpload: DriveArtifact | null;
     transcriptTextUpload: DriveArtifact | null;
+    participantJsonUpload: DriveArtifact | null;
+    participantTextUpload: DriveArtifact | null;
+    participantArtifactStatus: ParticipantArtifactStatus | null;
+    participantArtifactError: string | null;
+    participantArtifactAttempts: number;
+    participantArtifactNextRetryAt: string | null;
     lastError: string | null;
 };
 

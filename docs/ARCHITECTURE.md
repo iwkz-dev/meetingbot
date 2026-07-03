@@ -11,7 +11,7 @@ The rebuilt application must:
 - track the complete bot lifecycle through verified webhooks;
 - support automatic leaving and manual leave from the control panel;
 - create a post-meeting transcript with Recall.ai;
-- upload the mixed MP4 recording and two transcript formats to Google Drive;
+- upload the mixed MP4 recording, two transcript formats, and two participant artifacts to Google Drive;
 - route files according to `RAPAT` or `SEMINAR`;
 - preserve job state across process or container restarts;
 - remain idempotent when Recall retries webhook delivery;
@@ -42,7 +42,7 @@ flowchart LR
     R -->|Verified lifecycle webhooks| W
 
     W -->|Persist job state| S[(Atomic JSON Meeting Store)]
-    W -->|Upload MP4 + transcript files| G[Google Drive Workspace]
+    W -->|Upload MP4 + transcript + participant files| G[Google Drive Workspace]
     G -->|Transcript input| A[Downstream AI Agent]
     A -->|Meeting notes or blog content| O[Organization Output]
 ```
@@ -234,7 +234,7 @@ Meeting type
 Normalized app status
 Recall code/subcode/message
 Lifecycle timestamps
-Drive artifact IDs, names, and links
+Drive artifact IDs, names, links, and participant artifact retry state
 Last error
 ```
 
@@ -253,11 +253,13 @@ All artifacts for a processed meeting are uploaded into the same per-meeting sub
 YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.mp4
 YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.transcript.json
 YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.transcript.txt
+YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.participants.json
+YYYY-MM-DD_HH-mm_<sanitized-meeting-subject>_<short-job-id>.participants.txt
 ```
 
 The base name must preserve useful Unicode letters and numbers, replace forbidden filesystem characters, normalize repeated whitespace, and be length-limited.
 
-## 8. Transcript formats
+## 8. Artifact formats
 
 ### Raw JSON
 
@@ -441,6 +443,8 @@ When usage grows beyond one container, evolve the architecture in this order:
 5. Add object storage as a staging area for large media.
 6. Add user accounts, authorization, and tenant-specific Drive routing.
 7. Add scheduling and calendar integrations while retaining the same `join_at` abstraction.
+
+
 
 
 
