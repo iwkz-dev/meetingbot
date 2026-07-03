@@ -16,9 +16,14 @@ type DriveListResponse = {
     };
 };
 
+type DriveGetResponse = {
+    data: unknown;
+};
+
 type DriveFilesResourceLike = {
     create: (params: Record<string, unknown>) => Promise<{ data: Record<string, unknown> }>;
     list: (params: Record<string, unknown>) => Promise<DriveListResponse>;
+    get: (params: Record<string, unknown>, options?: Record<string, unknown>) => Promise<DriveGetResponse>;
 };
 
 type DriveLike = {
@@ -114,6 +119,75 @@ export async function ensureMeetingFolder(
     return parseDriveFolder(created.data, 'Created Google Drive folder response was incomplete');
 }
 
+export async function findFileInFolderByExactName(
+    fileName: string,
+    folderId: string,
+    drive: DriveLike = createDriveClient(),
+): Promise<DriveArtifact | null> {
+    if (!fileName.trim()) {
+        throw new Error('Google Drive file name is required');
+    }
+
+    if (!folderId.trim()) {
+        throw new Error('Google Drive folder ID is required');
+    }
+
+    const response = await drive.files.list({
+        q: [
+            `'${escapeDriveQueryValue(folderId)}' in parents`,
+            'trashed=false',
+            `name='${escapeDriveQueryValue(fileName)}'`,
+        ].join(' and '),
+        fields: 'files(id, name, webViewLink)',
+        includeItemsFromAllDrives: true,
+        supportsAllDrives: true,
+        pageSize: 10,
+    });
+
+    const file = response.data.files?.[0];
+    return file
+        ? parseDriveArtifact(file, 'Existing Google Drive file response was incomplete')
+        : null;
+}
+
+export async function downloadTextFileFromGDrive(
+    fileId: string,
+    drive: DriveLike = createDriveClient(),
+) {
+    if (!fileId.trim()) {
+        throw new Error('Google Drive file ID is required');
+    }
+
+    const response = await drive.files.get(
+        {
+            fileId,
+            alt: 'media',
+            supportsAllDrives: true,
+        },
+        {
+            responseType: 'arraybuffer',
+        },
+    );
+
+    if (typeof response.data === 'string') {
+        return response.data;
+    }
+
+    if (Buffer.isBuffer(response.data)) {
+        return response.data.toString('utf8');
+    }
+
+    if (response.data instanceof Uint8Array) {
+        return Buffer.from(response.data).toString('utf8');
+    }
+
+    if (response.data instanceof ArrayBuffer) {
+        return Buffer.from(response.data).toString('utf8');
+    }
+
+    throw new Error(`Google Drive text download response was invalid for file ${fileId}`);
+}
+
 export async function listDirectChildFolders(
     parentFolderId: string,
     drive: DriveLike = createDriveClient(),
@@ -166,6 +240,8 @@ export function resolveDriveMimeType(filePath: string) {
             return 'application/json';
         case '.txt':
             return 'text/plain; charset=utf-8';
+        case '.md':
+            return 'text/markdown; charset=utf-8';
         default:
             return 'application/octet-stream';
     }

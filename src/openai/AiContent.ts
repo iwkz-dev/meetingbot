@@ -66,6 +66,7 @@ export function buildDefaultAiContentState(meeting: AiReadinessMeeting): AiConte
         outputFilename: null,
         openaiResponseId: null,
         openaiRequestId: null,
+        openaiInputFileIds: [],
         inputTokens: null,
         outputTokens: null,
         attemptCount: 0,
@@ -99,6 +100,7 @@ export function normalizeAiContentState(
         outputFilename: asTrimmedString(rawState.outputFilename),
         openaiResponseId: asTrimmedString(rawState.openaiResponseId),
         openaiRequestId: asTrimmedString(rawState.openaiRequestId),
+        openaiInputFileIds: asStringArray(rawState.openaiInputFileIds),
         inputTokens: asNonNegativeNumber(rawState.inputTokens),
         outputTokens: asNonNegativeNumber(rawState.outputTokens),
         attemptCount: asNonNegativeNumber(rawState.attemptCount) ?? 0,
@@ -164,6 +166,17 @@ function asNonNegativeNumber(value: unknown) {
     return typeof value === 'number' && Number.isFinite(value) && value >= 0
         ? value
         : null;
+}
+
+function asStringArray(value: unknown) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
 }
 
 function isAiContentKind(value: unknown): value is AiContentKind {

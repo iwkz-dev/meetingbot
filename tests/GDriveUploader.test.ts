@@ -44,6 +44,7 @@ test('ensureMeetingFolder reuses existing folder before creating a new one', asy
                 calls.push('create');
                 return { data: {} };
             },
+            get: async () => ({ data: '' }),
         },
     });
 
@@ -58,6 +59,7 @@ test('listDirectChildFolders paginates and validates safe folder fields', async 
     const folders = await listDirectChildFolders('root-folder', {
         files: {
             create: async () => ({ data: {} }),
+            get: async () => ({ data: '' }),
             list: async (params) => {
                 calls.push(params);
 

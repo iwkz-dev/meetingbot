@@ -4,10 +4,17 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { AppConfig } from './config';
-import { ensureMeetingFolder, uploadFileToGDrive } from './GDriveUploader';
+import {
+    downloadTextFileFromGDrive,
+    ensureMeetingFolder,
+    findFileInFolderByExactName,
+    uploadFileToGDrive,
+} from './GDriveUploader';
 import { MeetingStore } from './MeetingStore';
 import { RecallClient } from './RecallClient';
 import { sanitizeFilenameBaseName } from './filename';
+import { hasRequiredAiSourceArtifacts } from './openai/AiContent';
+import { OpenAIContentGenerationService } from './openai/OpenAIContentGenerationService';
 import {
     DriveArtifact,
     DriveFolder,
@@ -32,6 +39,8 @@ type ProcessingLogger = {
 type GDriveArtifactsClient = {
     ensureMeetingFolder: (folderName: string, parentFolderId: string) => Promise<DriveFolder>;
     uploadFile: (finalFileName: string, localFilePath: string, folderId: string) => Promise<DriveArtifact>;
+    findFileByName?: (fileName: string, folderId: string) => Promise<DriveArtifact | null>;
+    downloadTextFile?: (fileId: string) => Promise<string>;
 };
 
 type MeetingProcessingServiceDependencies = {
@@ -40,6 +49,7 @@ type MeetingProcessingServiceDependencies = {
     now?: () => string;
     tempDirRoot?: string;
     gdriveClient?: GDriveArtifactsClient;
+    aiContentService?: OpenAIContentGenerationService;
 };
 
 type TranscriptWord = {
@@ -59,6 +69,7 @@ export class MeetingProcessingService {
     private readonly now: () => string;
     private readonly tempDirRoot: string;
     private readonly gdriveClient: GDriveArtifactsClient;
+    private readonly aiContentService: OpenAIContentGenerationService;
     private readonly locks = new Set<string>();
 
     constructor(
@@ -74,7 +85,16 @@ export class MeetingProcessingService {
         this.gdriveClient = dependencies.gdriveClient ?? {
             ensureMeetingFolder,
             uploadFile: uploadFileToGDrive,
+            findFileByName: findFileInFolderByExactName,
+            downloadTextFile: downloadTextFileFromGDrive,
         };
+        this.aiContentService =
+            dependencies.aiContentService ??
+            new OpenAIContentGenerationService(this.config, {
+                gdriveClient: this.gdriveClient,
+                logger: this.logger,
+                now: this.now,
+            });
     }
 
     async processCompletedMeeting(
@@ -101,7 +121,8 @@ export class MeetingProcessingService {
                 (meeting.status === 'uploading' &&
                     Boolean(meeting.recallRecordingId) &&
                     hasMissingRequiredArtifacts(meeting)) ||
-                shouldRetryParticipantArtifacts(meeting, now),
+                shouldRetryParticipantArtifacts(meeting, now) ||
+                shouldRetryAiContent(meeting),
         );
 
         await Promise.all(
@@ -176,6 +197,10 @@ export class MeetingProcessingService {
                 tempDir,
                 `${baseName}.transcript.txt`,
             );
+            const participantTextPath = path.join(
+                tempDir,
+                `${baseName}.participants.txt`,
+            );
 
             const driveFolder = await this.ensurePersistedDriveFolder(meeting);
             meeting = (await this.store.getById(meeting.id)) ?? meeting;
@@ -207,6 +232,14 @@ export class MeetingProcessingService {
                 baseName,
                 tempDir,
             );
+            meeting = (await this.store.getById(meeting.id)) ?? meeting;
+
+            if (!videoOnly) {
+                await this.processAiContent(meeting, driveFolder, baseName, tempDir, {
+                    transcriptTextPath,
+                    participantTextPath,
+                });
+            }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             errors.push(message);
@@ -576,6 +609,37 @@ export class MeetingProcessingService {
         }));
     }
 
+    private async processAiContent(
+        meeting: MeetingJob,
+        driveFolder: DriveFolder,
+        baseName: string,
+        tempDir: string,
+        localPaths: { transcriptTextPath: string; participantTextPath: string },
+    ) {
+        if (!driveFolder.id) {
+            return;
+        }
+
+        const currentMeeting = (await this.store.getById(meeting.id)) ?? meeting;
+        if (!shouldAttemptAiContent(currentMeeting)) {
+            return;
+        }
+
+        await this.aiContentService.generateForMeeting({
+            meeting: currentMeeting,
+            baseName,
+            driveFolderId: driveFolder.id,
+            tempDir,
+            transcriptTextPath: localPaths.transcriptTextPath,
+            participantTextPath: localPaths.participantTextPath,
+            persistAiState: (updater) =>
+                this.store.updateJob(meeting.id, (current) => ({
+                    ...current,
+                    aiContent: updater(current.aiContent),
+                })),
+        });
+    }
+
     private async finalizeMeeting(
         meetingId: string,
         videoOnly: boolean,
@@ -586,16 +650,19 @@ export class MeetingProcessingService {
             const mergedError = mergeErrorMessages(current.lastError, [
                 ...errors,
                 current.participantArtifactError,
+                current.aiContent.errorMessage,
             ]);
             const hasVideo = Boolean(current.videoUpload);
             const hasTranscriptJson = Boolean(current.transcriptJsonUpload);
             const hasTranscriptText = Boolean(current.transcriptTextUpload);
             const transcriptComplete =
                 videoOnly || (hasTranscriptJson && hasTranscriptText);
+            const aiIncomplete = !videoOnly && hasMissingAiArtifact(current);
             const hasProcessingErrors =
                 errors.length > 0 ||
                 (videoOnly && Boolean(current.lastError)) ||
-                participantIncomplete;
+                participantIncomplete ||
+                aiIncomplete;
 
             let status: MeetingJob['status'];
             if (!hasVideo) {
@@ -1030,7 +1097,8 @@ function hasMissingRequiredArtifacts(meeting: MeetingJob) {
     return (
         !meeting.transcriptJsonUpload ||
         !meeting.transcriptTextUpload ||
-        hasMissingParticipantArtifacts(meeting)
+        hasMissingParticipantArtifacts(meeting) ||
+        hasMissingAiArtifact(meeting)
     );
 }
 
@@ -1046,7 +1114,8 @@ function isFullyProcessed(meeting: MeetingJob, videoOnly: boolean) {
     return Boolean(
         meeting.videoUpload &&
             hasCompletedParticipantArtifacts(meeting) &&
-            (videoOnly || (meeting.transcriptJsonUpload && meeting.transcriptTextUpload)),
+            (videoOnly || (meeting.transcriptJsonUpload && meeting.transcriptTextUpload)) &&
+            (videoOnly || hasCompletedAiContent(meeting)),
     );
 }
 
@@ -1076,6 +1145,42 @@ function shouldAttemptParticipantArtifacts(meeting: MeetingJob, now: string) {
     }
 
     return meeting.participantArtifactStatus !== 'failed';
+}
+
+function hasCompletedAiContent(meeting: MeetingJob) {
+    return Boolean(meeting.aiContent.driveFileId && meeting.aiContent.status === 'done');
+}
+
+function hasMissingAiArtifact(meeting: MeetingJob) {
+    if (!hasRequiredAiSourceArtifacts(meeting)) {
+        return false;
+    }
+
+    return !hasCompletedAiContent(meeting);
+}
+
+function shouldAttemptAiContent(meeting: MeetingJob) {
+    if (!meeting.driveFolder?.id || !hasRequiredAiSourceArtifacts(meeting)) {
+        return false;
+    }
+
+    if (meeting.aiContent.driveFileId) {
+        return false;
+    }
+
+    return meeting.aiContent.status !== 'failed' || !meeting.aiContent.errorCode;
+}
+
+function shouldRetryAiContent(meeting: MeetingJob) {
+    if (!meeting.recallRecordingId || !shouldAttemptAiContent(meeting)) {
+        return false;
+    }
+
+    return (
+        meeting.status === 'uploading' ||
+        meeting.status === 'completed' ||
+        meeting.status === 'completed_with_errors'
+    );
 }
 
 function shouldRetryParticipantArtifacts(meeting: MeetingJob, now: string) {

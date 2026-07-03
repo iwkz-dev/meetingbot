@@ -34,6 +34,7 @@ export type AiContentArtifactState = {
     outputFilename: string | null;
     openaiResponseId: string | null;
     openaiRequestId: string | null;
+    openaiInputFileIds: string[];
     inputTokens: number | null;
     outputTokens: number | null;
     attemptCount: number;

@@ -37,6 +37,7 @@ async function createHarness(options: {
     participantsBody?: string;
     uploadFailureNameIncludes?: string;
     now?: string;
+    aiContentService?: { generateForMeeting: (args: Record<string, unknown>) => Promise<void> };
 } = {}) {
     const config = buildConfig();
     const store = await MeetingStore.create(await createTempDir('meetingbot-processing-store-'));
@@ -174,16 +175,55 @@ async function createHarness(options: {
         throw new Error(`Unexpected fetch URL: ${value}`);
     };
 
+
     const recallClient = new RecallClient(config, {
         fetchImpl,
         jitterMs: () => 0,
         sleep: async () => undefined,
     });
 
+    const job = await store.createJob({
+        meetingUrl: 'https://meet.google.com/abc-defg-hij',
+        meetingSubject: 'HelloWorld',
+        botDisplayName: options.botDisplayName ?? 'IWKZ Bot',
+        meetingType: options.meetingType ?? 'SEMINAR',
+        onJoinMessage: '',
+        status: 'uploading',
+    });
+
+    const seeded = await store.updateJob(job.id, (current) => ({
+        ...current,
+        status: 'uploading',
+        createdAt: now,
+        recallBotId: 'bot-1',
+        recallRecordingId: 'recording-1',
+        recallTranscriptId: 'transcript-1',
+        processingStartedAt: current.processingStartedAt ?? now,
+        artifactProcessingMode: 'full',
+    }));
+
+    const effectiveAiContentService =
+        options.aiContentService ??
+        {
+            generateForMeeting: async () => {
+                await store.updateJob((seeded ?? job).id, (current) => ({
+                    ...current,
+                    aiContent: {
+                        ...current.aiContent,
+                        status: 'done',
+                        driveFileId: 'drive-ai-default',
+                        outputFilename: `${buildMeetingArtifactBaseName(current)}.blog.md`,
+                        completedAt: now,
+                    },
+                }));
+            },
+        };
+
     const service = new MeetingProcessingService(store, recallClient, config, {
         fetchImpl,
         now: () => now,
         tempDirRoot,
+        aiContentService: effectiveAiContentService as any,
         gdriveClient: {
             ensureMeetingFolder: async (folderName, parentFolderId) => {
                 ensureFolderCalls.push({ folderName, parentFolderId });
@@ -215,26 +255,6 @@ async function createHarness(options: {
             },
         },
     });
-
-    const job = await store.createJob({
-        meetingUrl: 'https://meet.google.com/abc-defg-hij',
-        meetingSubject: 'HelloWorld',
-        botDisplayName: options.botDisplayName ?? 'IWKZ Bot',
-        meetingType: options.meetingType ?? 'SEMINAR',
-        onJoinMessage: '',
-        status: 'uploading',
-    });
-
-    const seeded = await store.updateJob(job.id, (current) => ({
-        ...current,
-        status: 'uploading',
-        createdAt: now,
-        recallBotId: 'bot-1',
-        recallRecordingId: 'recording-1',
-        recallTranscriptId: 'transcript-1',
-        processingStartedAt: current.processingStartedAt ?? now,
-        artifactProcessingMode: 'full',
-    }));
 
     return {
         config,
@@ -472,6 +492,35 @@ test('MeetingProcessingService videoOnly mode still uploads video and participan
     assert.equal(updated?.transcriptTextUpload, null);
     assert.ok(updated?.participantJsonUpload);
     assert.ok(updated?.participantTextUpload);
+});
+
+test('MeetingProcessingService triggers AI generation once source artifacts are ready', async () => {
+    const aiCalls: Array<Record<string, unknown>> = [];
+    const harness = await createHarness({
+        aiContentService: {
+            generateForMeeting: async (args) => {
+                aiCalls.push(args);
+                await harness.store.updateJob(harness.job.id, (current) => ({
+                    ...current,
+                    aiContent: {
+                        ...current.aiContent,
+                        status: 'done',
+                        driveFileId: 'drive-ai-1',
+                        outputFilename: `${buildMeetingArtifactBaseName(current)}.blog.md`,
+                        completedAt: '2026-07-02T13:45:00.000Z',
+                    },
+                }));
+            },
+        },
+    });
+
+    await harness.service.processCompletedMeeting(harness.job.id);
+    await harness.service.processCompletedMeeting(harness.job.id);
+
+    const updated = await harness.store.getById(harness.job.id);
+    assert.equal(aiCalls.length, 1);
+    assert.equal(updated?.aiContent.status, 'done');
+    assert.equal(updated?.status, 'completed');
 });
 
 test('MeetingProcessingService resumeInterruptedJobs requeues persisted uploads', async () => {

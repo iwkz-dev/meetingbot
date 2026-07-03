@@ -58,6 +58,7 @@ test('default and normalized AI content state stay backward compatible', () => {
     const fallback = buildDefaultAiContentState({ meetingType: 'RAPAT' });
     assert.equal(fallback.kind, 'rapat_meeting_notes');
     assert.equal(fallback.status, 'not_ready');
+    assert.deepEqual(fallback.openaiInputFileIds, []);
 
     const normalized = normalizeAiContentState(
         {
@@ -68,6 +69,7 @@ test('default and normalized AI content state stay backward compatible', () => {
             status: 'processing',
             driveFileId: 'drive-1',
             outputFilename: 'hello.blog.md',
+            openaiInputFileIds: ['file-1', ' file-2 '],
             attemptCount: 2,
         },
     );
@@ -76,6 +78,7 @@ test('default and normalized AI content state stay backward compatible', () => {
     assert.equal(normalized.status, 'done');
     assert.equal(normalized.driveFileId, 'drive-1');
     assert.equal(normalized.outputFilename, 'hello.blog.md');
+    assert.deepEqual(normalized.openaiInputFileIds, ['file-1', 'file-2']);
     assert.equal(normalized.attemptCount, 2);
 });
 
