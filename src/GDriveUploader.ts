@@ -9,13 +9,28 @@ const REFRESH_TOKEN = process.env.GDRIVE_REFRESH_TOKEN;
 const OAUTH_REDIRECT_URI = process.env.GDRIVE_OAUTH_REDIRECT_URI;
 const FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
 
+type DriveListResponse = {
+    data: {
+        files?: Array<Record<string, unknown>>;
+        nextPageToken?: unknown;
+    };
+};
+
 type DriveFilesResourceLike = {
     create: (params: Record<string, unknown>) => Promise<{ data: Record<string, unknown> }>;
-    list: (params: Record<string, unknown>) => Promise<{ data: { files?: Array<Record<string, unknown>> } }>;
+    list: (params: Record<string, unknown>) => Promise<DriveListResponse>;
 };
 
 type DriveLike = {
     files: DriveFilesResourceLike;
+};
+
+export type DriveHistoryFolder = {
+    id: string;
+    name: string;
+    link: string | null;
+    createdTime: string | null;
+    modifiedTime: string | null;
 };
 
 const oAuth2Client = new google.auth.OAuth2(
@@ -99,6 +114,50 @@ export async function ensureMeetingFolder(
     return parseDriveFolder(created.data, 'Created Google Drive folder response was incomplete');
 }
 
+export async function listDirectChildFolders(
+    parentFolderId: string,
+    drive: DriveLike = createDriveClient(),
+): Promise<DriveHistoryFolder[]> {
+    if (!parentFolderId.trim()) {
+        throw new Error('Google Drive parent folder ID is required');
+    }
+
+    const folders: DriveHistoryFolder[] = [];
+    let pageToken: string | undefined;
+
+    do {
+        const response = await drive.files.list({
+            q: [
+                `'${escapeDriveQueryValue(parentFolderId)}' in parents`,
+                `mimeType='${FOLDER_MIME_TYPE}'`,
+                'trashed=false',
+            ].join(' and '),
+            fields: 'nextPageToken, files(id, name, webViewLink, createdTime, modifiedTime)',
+            spaces: 'drive',
+            includeItemsFromAllDrives: true,
+            supportsAllDrives: true,
+            pageSize: 100,
+            pageToken,
+        });
+
+        for (const file of response.data.files ?? []) {
+            folders.push(
+                parseDriveHistoryFolder(
+                    file,
+                    'Google Drive history folder response was incomplete',
+                ),
+            );
+        }
+
+        pageToken =
+            typeof response.data.nextPageToken === 'string' && response.data.nextPageToken
+                ? response.data.nextPageToken
+                : undefined;
+    } while (pageToken);
+
+    return folders;
+}
+
 export function resolveDriveMimeType(filePath: string) {
     switch (path.extname(filePath).toLowerCase()) {
         case '.mp4':
@@ -129,9 +188,9 @@ function parseDriveArtifact(data: Record<string, unknown>, errorMessage: string)
 }
 
 function parseDriveFolder(data: Record<string, unknown>, errorMessage: string): DriveFolder {
-    const id = typeof data.id === 'string' ? data.id : '';
-    const name = typeof data.name === 'string' ? data.name : '';
-    const link = typeof data.webViewLink === 'string' ? data.webViewLink : null;
+    const id = typeof data.id === 'string' ? data.id.trim() : '';
+    const name = typeof data.name === 'string' ? data.name.trim() : '';
+    const link = parseHttpsLink(data.webViewLink);
 
     if (!id || !name) {
         throw new Error(errorMessage);
@@ -140,7 +199,57 @@ function parseDriveFolder(data: Record<string, unknown>, errorMessage: string): 
     return { id, name, link };
 }
 
+function parseDriveHistoryFolder(
+    data: Record<string, unknown>,
+    errorMessage: string,
+): DriveHistoryFolder {
+    const id = typeof data.id === 'string' ? data.id.trim() : '';
+    const name = typeof data.name === 'string' ? data.name.trim() : '';
+
+    if (!id || !name) {
+        throw new Error(errorMessage);
+    }
+
+    return {
+        id,
+        name,
+        link: parseHttpsLink(data.webViewLink),
+        createdTime: parseDriveTimestamp(data.createdTime),
+        modifiedTime: parseDriveTimestamp(data.modifiedTime),
+    };
+}
+
+function parseDriveTimestamp(value: unknown) {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    return Number.isNaN(Date.parse(trimmed)) ? null : trimmed;
+}
+
+function parseHttpsLink(value: unknown) {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    try {
+        const parsed = new URL(trimmed);
+        return parsed.protocol === 'https:' ? parsed.toString() : null;
+    } catch {
+        return null;
+    }
+}
+
 function escapeDriveQueryValue(value: string) {
     return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
-

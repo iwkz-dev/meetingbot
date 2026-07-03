@@ -103,6 +103,15 @@ export type ControlPanelMeeting = {
     lastError: string | null;
 };
 
+export type ControlPanelHistoryMeeting = {
+    id: string;
+    name: string;
+    meetingType: 'rapat' | 'seminar';
+    driveLink: string | null;
+    createdTime: string | null;
+    modifiedTime: string | null;
+};
+
 export type RuntimeStats = {
     activeMeetings: number;
     completedMeetings: number;

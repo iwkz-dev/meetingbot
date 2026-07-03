@@ -15,9 +15,11 @@
                 --accent-strong: #094d47;
                 --danger: #b7482c;
                 --chip: #efe5d4;
+                --table-head: #f1e8d8;
             }
 
             * { box-sizing: border-box; }
+            [hidden] { display: none !important; }
             body {
                 margin: 0;
                 padding: 24px;
@@ -44,22 +46,67 @@
             }
             .hero h1 { margin: 0; font-size: clamp(2rem, 4vw, 3rem); }
             .hero p { margin: 8px 0 0; color: var(--muted); max-width: 680px; line-height: 1.5; }
-            .layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr); gap: 20px; }
             .panel { padding: 22px; }
             .panel h2 { margin: 0 0 14px; font-size: 1.2rem; }
-            .stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-            .stat { padding: 14px; border-radius: 16px; background: var(--chip); }
-            .stat span { display: block; color: var(--muted); font-size: 0.88rem; }
-            .stat strong { display: block; margin-top: 6px; font-size: 1.05rem; }
+            .layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr); gap: 20px; }
             form { display: grid; gap: 14px; }
             label { display: block; margin-bottom: 6px; font-weight: 600; }
             input, select, textarea, button { width: 100%; border-radius: 12px; font: inherit; }
-            input, select, textarea { padding: 12px 14px; border: 1px solid var(--line); background: white; color: var(--text); }
+            input, select, textarea {
+                padding: 12px 14px;
+                border: 1px solid var(--line);
+                background: white;
+                color: var(--text);
+            }
             textarea { min-height: 104px; resize: vertical; }
-            button { padding: 12px 16px; border: none; cursor: pointer; color: white; background: var(--accent); font-weight: 600; }
+            button {
+                padding: 12px 16px;
+                border: none;
+                cursor: pointer;
+                color: white;
+                background: var(--accent);
+                font-weight: 600;
+            }
             button.secondary { background: #8d7d66; }
+            button.ghost {
+                width: auto;
+                background: transparent;
+                color: var(--accent-strong);
+                border: 1px solid var(--line);
+            }
             button.leave { background: var(--danger); }
             button:disabled { opacity: 0.6; cursor: wait; }
+            .tabs {
+                display: inline-flex;
+                gap: 10px;
+                padding: 6px;
+                border-radius: 18px;
+                background: rgba(239, 229, 212, 0.85);
+                border: 1px solid var(--line);
+            }
+            .tab {
+                width: auto;
+                border: 1px solid transparent;
+                background: transparent;
+                color: var(--muted);
+                padding: 10px 14px;
+                border-radius: 12px;
+            }
+            .tab[aria-selected="true"] {
+                background: white;
+                color: var(--accent-strong);
+                border-color: var(--line);
+                box-shadow: 0 10px 24px rgba(43, 37, 30, 0.08);
+            }
+            .tab:focus-visible,
+            button:focus-visible,
+            input:focus-visible,
+            select:focus-visible,
+            textarea:focus-visible,
+            a:focus-visible {
+                outline: 3px solid rgba(13, 108, 99, 0.25);
+                outline-offset: 2px;
+            }
             .meetings { display: grid; gap: 14px; }
             .meeting { padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: white; }
             .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
@@ -70,10 +117,66 @@
             .notice { min-height: 24px; color: var(--muted); font-size: 0.95rem; }
             .notice.error { color: var(--danger); }
             .empty { padding: 18px; border-radius: 18px; background: var(--chip); color: var(--muted); }
+            .history-toolbar {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) 200px auto;
+                gap: 12px;
+                margin-bottom: 14px;
+                align-items: end;
+            }
+            .history-summary {
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                align-items: center;
+                margin-bottom: 14px;
+                color: var(--muted);
+                font-size: 0.94rem;
+            }
+            .table-wrap {
+                overflow: auto;
+                border: 1px solid var(--line);
+                border-radius: 18px;
+                background: white;
+            }
+            table {
+                width: 100%;
+                min-width: 640px;
+                border-collapse: collapse;
+            }
+            th, td {
+                text-align: left;
+                padding: 14px 16px;
+                border-bottom: 1px solid #eee4d4;
+                vertical-align: top;
+            }
+            th {
+                position: sticky;
+                top: 0;
+                background: var(--table-head);
+                z-index: 1;
+                font-size: 0.92rem;
+            }
+            td { color: var(--muted); }
+            td strong, td a { color: var(--accent-strong); }
+            tr:last-child td { border-bottom: none; }
+            .row-action {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 112px;
+                padding: 10px 12px;
+                border-radius: 10px;
+                border: 1px solid var(--line);
+                color: var(--accent-strong);
+                text-decoration: none;
+                background: #fffdf9;
+            }
             a { color: var(--accent-strong); }
             @media (max-width: 900px) {
                 .layout { grid-template-columns: 1fr; }
-                .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                .history-toolbar { grid-template-columns: 1fr; }
+                .history-summary { align-items: flex-start; flex-direction: column; }
             }
         </style>
     </head>
@@ -83,8 +186,8 @@
                 <div>
                     <h1>Meeting Bot Control Panel</h1>
                     <p>
-                        Recall.ai bot creation is active. Submit a meeting, track the persisted
-                        lifecycle state here, and use Leave Meeting when you need to stop a live bot.
+                        Recall.ai bot creation is active. Submit a meeting, track live lifecycle
+                        state, and browse Google Drive meeting folders from one place.
                     </p>
                 </div>
                 <form method="POST" action="/control-panel/logout">
@@ -93,57 +196,145 @@
             </section>
 
             <section class="panel">
-                <h2>Runtime Overview</h2>
-                <div class="stats" id="stats"></div>
+                <div class="tabs" role="tablist" aria-label="Control panel sections">
+                    <button
+                        class="tab"
+                        id="tab-meeting-bot"
+                        type="button"
+                        role="tab"
+                        aria-selected="true"
+                        aria-controls="panel-meeting-bot"
+                        data-tab="meeting-bot"
+                    >
+                        Meeting Bot
+                    </button>
+                    <button
+                        class="tab"
+                        id="tab-meeting-history"
+                        type="button"
+                        role="tab"
+                        aria-selected="false"
+                        aria-controls="panel-meeting-history"
+                        data-tab="meeting-history"
+                    >
+                        Meeting History
+                    </button>
+                </div>
             </section>
 
-            <div class="layout">
-                <section class="panel">
-                    <h2>Invite Bot</h2>
-                    <form id="invite-form">
-                        <div>
-                            <label for="meetingUrl">Meeting URL</label>
-                            <input type="text" id="meetingUrl" name="meetingUrl" placeholder="https://..." required />
-                        </div>
-                        <div>
-                            <label for="meetingSubject">Meeting Subject</label>
-                            <input type="text" id="meetingSubject" name="meetingSubject" placeholder="Weekly sync" required />
-                        </div>
-                        <div>
-                            <label for="botDisplayName">Bot Name</label>
-                            <input type="text" id="botDisplayName" name="botDisplayName" placeholder="IWKZ Bot" value="IWKZ Bot" required />
-                        </div>
-                        <div>
-                            <label for="meetingType">Meeting Type</label>
-                            <select id="meetingType" name="meetingType" required>
-                                <option value="seminar">Seminar</option>
-                                <option value="rapat">Rapat</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label for="onJoinMessage">On-join Message</label>
-                            <textarea id="onJoinMessage" name="onJoinMessage" placeholder="This meeting is being recorded."></textarea>
-                        </div>
-                        <button type="submit">Start Bot</button>
-                    </form>
-                    <p class="notice" id="invite-notice"></p>
-                </section>
+            <section id="panel-meeting-bot" class="tab-panel" role="tabpanel" aria-labelledby="tab-meeting-bot">
+                <div class="layout">
+                    <section class="panel">
+                        <h2>Invite Bot</h2>
+                        <form id="invite-form">
+                            <div>
+                                <label for="meetingUrl">Meeting URL</label>
+                                <input type="text" id="meetingUrl" name="meetingUrl" placeholder="https://..." required />
+                            </div>
+                            <div>
+                                <label for="meetingSubject">Meeting Subject</label>
+                                <input type="text" id="meetingSubject" name="meetingSubject" placeholder="Weekly sync" required />
+                            </div>
+                            <div>
+                                <label for="botDisplayName">Bot Name</label>
+                                <input type="text" id="botDisplayName" name="botDisplayName" placeholder="IWKZ Bot" value="IWKZ Bot" required />
+                            </div>
+                            <div>
+                                <label for="meetingType">Meeting Type</label>
+                                <select id="meetingType" name="meetingType" required>
+                                    <option value="seminar">Seminar</option>
+                                    <option value="rapat">Rapat</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="onJoinMessage">On-join Message</label>
+                                <textarea id="onJoinMessage" name="onJoinMessage" placeholder="This meeting is being recorded."></textarea>
+                            </div>
+                            <button type="submit">Start Bot</button>
+                        </form>
+                        <p class="notice" id="invite-notice"></p>
+                    </section>
 
-                <section class="panel">
-                    <h2>Meetings</h2>
-                    <div class="meetings" id="meetings">
-                        <div class="empty">Loading meeting state...</div>
+                    <section class="panel">
+                        <h2>Live Sessions</h2>
+                        <div class="meetings" id="meetings">
+                            <div class="empty">Loading meeting state...</div>
+                        </div>
+                    </section>
+                </div>
+            </section>
+
+            <section
+                id="panel-meeting-history"
+                class="tab-panel panel"
+                role="tabpanel"
+                aria-labelledby="tab-meeting-history"
+                hidden
+            >
+                <h2>Meeting History</h2>
+                <div class="history-toolbar">
+                    <div>
+                        <label for="history-search">Search meeting name</label>
+                        <input id="history-search" type="search" placeholder="Search meeting name" />
                     </div>
-                </section>
-            </div>
+                    <div>
+                        <label for="history-type">Meeting Type</label>
+                        <select id="history-type">
+                            <option value="all">All</option>
+                            <option value="rapat">Rapat</option>
+                            <option value="seminar">Seminar</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>&nbsp;</label>
+                        <button id="history-refresh" class="ghost" type="button">Refresh</button>
+                    </div>
+                </div>
+                <div class="history-summary">
+                    <span id="history-count">0 results</span>
+                    <span id="history-status">Open this tab to load Google Drive folders.</span>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Meeting Name</th>
+                                <th>Meeting Type</th>
+                                <th>Google Drive</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-rows">
+                            <tr>
+                                <td colspan="3" class="empty">Meeting history has not been loaded yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
         </div>
 
         <script>
-            const statsNode = document.getElementById('stats');
             const meetingsNode = document.getElementById('meetings');
             const inviteForm = document.getElementById('invite-form');
             const inviteNotice = document.getElementById('invite-notice');
+            const tabButtons = Array.from(document.querySelectorAll('[role="tab"]'));
+            const tabPanels = {
+                'meeting-bot': document.getElementById('panel-meeting-bot'),
+                'meeting-history': document.getElementById('panel-meeting-history'),
+            };
+            const historySearch = document.getElementById('history-search');
+            const historyType = document.getElementById('history-type');
+            const historyRefresh = document.getElementById('history-refresh');
+            const historyCount = document.getElementById('history-count');
+            const historyStatus = document.getElementById('history-status');
+            const historyRows = document.getElementById('history-rows');
+
             let leaveInFlightMeetingId = null;
+            let activeTab = 'meeting-bot';
+            let historyLoaded = false;
+            let historyLoading = false;
+            let historyItems = [];
+            let historyError = '';
 
             function formatTime(value) {
                 if (!value) return '-';
@@ -158,6 +349,19 @@
                     .replaceAll('>', '&gt;')
                     .replaceAll('"', '&quot;')
                     .replaceAll("'", '&#39;');
+            }
+
+            function getSafeHttpsLink(value) {
+                if (typeof value !== 'string' || !value.trim()) {
+                    return null;
+                }
+
+                try {
+                    const parsed = new URL(value);
+                    return parsed.protocol === 'https:' ? parsed.toString() : null;
+                } catch {
+                    return null;
+                }
             }
 
             function canLeaveMeeting(meeting) {
@@ -187,6 +391,28 @@
                 return labels[status] || status;
             }
 
+            function setActiveTab(nextTab, options = {}) {
+                activeTab = nextTab;
+                for (const button of tabButtons) {
+                    const isActive = button.dataset.tab === nextTab;
+                    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                    button.tabIndex = isActive ? 0 : -1;
+                }
+
+                for (const [tabName, panel] of Object.entries(tabPanels)) {
+                    panel.hidden = tabName !== nextTab;
+                }
+
+                if (!options.skipFocus) {
+                    const activeButton = tabButtons.find((button) => button.dataset.tab === nextTab);
+                    activeButton?.focus();
+                }
+
+                if (nextTab === 'meeting-history' && !historyLoaded) {
+                    void fetchHistory();
+                }
+            }
+
             async function fetchState() {
                 const response = await fetch('/api/control-panel/state', { credentials: 'same-origin' });
                 if (response.status === 401) {
@@ -195,18 +421,39 @@
                 }
                 if (!response.ok) throw new Error('Could not load control panel state');
                 const payload = await response.json();
-                renderStats(payload.stats);
                 renderMeetings(payload.meetings);
             }
 
-            function renderStats(stats) {
-                statsNode.innerHTML = `
-                    <div class="stat"><span>Active Meetings</span><strong>${escapeHtml(stats.activeMeetings)}</strong></div>
-                    <div class="stat"><span>Completed</span><strong>${escapeHtml(stats.completedMeetings)}</strong></div>
-                    <div class="stat"><span>Failed</span><strong>${escapeHtml(stats.failedMeetings)}</strong></div>
-                    <div class="stat"><span>Last Started</span><strong>${escapeHtml(formatTime(stats.lastStartedAt))}</strong></div>
-                    <div class="stat"><span>Last Error</span><strong>${escapeHtml(stats.lastError || '-')}</strong></div>
-                `;
+            async function fetchHistory(options = {}) {
+                if (historyLoading) {
+                    return;
+                }
+
+                historyLoading = true;
+                historyError = '';
+                renderHistory();
+
+                try {
+                    const response = await fetch('/api/control-panel/history', { credentials: 'same-origin' });
+                    if (response.status === 401) {
+                        window.location.href = '/control-panel';
+                        return;
+                    }
+
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(payload.message || 'Could not load meeting history.');
+                    }
+
+                    historyItems = Array.isArray(payload.meetings) ? payload.meetings : [];
+                    historyLoaded = true;
+                } catch (error) {
+                    historyLoaded = true;
+                    historyError = error instanceof Error ? error.message : 'Could not load meeting history.';
+                } finally {
+                    historyLoading = false;
+                    renderHistory();
+                }
             }
 
             function renderMeetings(meetings) {
@@ -276,6 +523,71 @@
                 }
             }
 
+            function getFilteredHistoryItems() {
+                const search = historySearch.value.trim().toLowerCase();
+                const typeFilter = historyType.value;
+
+                return historyItems.filter((meeting) => {
+                    const matchesSearch = !search || String(meeting.name || '').toLowerCase().includes(search);
+                    const matchesType = typeFilter === 'all' || meeting.meetingType === typeFilter;
+                    return matchesSearch && matchesType;
+                });
+            }
+
+            function renderHistory() {
+                const filteredItems = getFilteredHistoryItems();
+                historyRefresh.disabled = historyLoading;
+                historyRefresh.textContent = historyLoading ? 'Refreshing...' : 'Refresh';
+                historyCount.textContent = `${filteredItems.length} result${filteredItems.length === 1 ? '' : 's'}`;
+
+                if (historyError) {
+                    historyStatus.textContent = historyError;
+                    historyStatus.className = 'notice error';
+                } else if (historyLoading && historyItems.length) {
+                    historyStatus.textContent = 'Refreshing Google Drive folders...';
+                    historyStatus.className = 'notice';
+                } else if (historyLoading) {
+                    historyStatus.textContent = 'Loading Google Drive folders...';
+                    historyStatus.className = 'notice';
+                } else if (historyLoaded) {
+                    historyStatus.textContent = 'Showing direct child folders from both Google Drive meeting roots.';
+                    historyStatus.className = 'notice';
+                } else {
+                    historyStatus.textContent = 'Open this tab to load Google Drive folders.';
+                    historyStatus.className = 'notice';
+                }
+
+                if (!historyLoaded && !historyLoading) {
+                    historyRows.innerHTML = '<tr><td colspan="3" class="empty">Meeting history has not been loaded yet.</td></tr>';
+                    return;
+                }
+
+                if (!filteredItems.length) {
+                    const message = historyLoading && !historyItems.length
+                        ? 'Loading meeting history...'
+                        : 'No meeting folders match the current filters.';
+                    historyRows.innerHTML = `<tr><td colspan="3" class="empty">${escapeHtml(message)}</td></tr>`;
+                    return;
+                }
+
+                historyRows.innerHTML = filteredItems.map((meeting) => {
+                    const link = getSafeHttpsLink(meeting.driveLink);
+                    const action = link
+                        ? `<a class="row-action" target="_blank" rel="noopener noreferrer" href="${escapeHtml(link)}">Open Folder</a>`
+                        : '<span>-</span>';
+
+                    return `
+                        <tr>
+                            <td>
+                                <strong>${escapeHtml(meeting.name)}</strong><br />
+                                <span>${escapeHtml(formatTime(meeting.createdTime || meeting.modifiedTime))}</span>
+                            </td>
+                            <td>${escapeHtml(meeting.meetingType === 'rapat' ? 'Rapat' : 'Seminar')}</td>
+                            <td>${action}</td>
+                        </tr>`;
+                }).join('');
+            }
+
             inviteForm.addEventListener('submit', async (event) => {
                 event.preventDefault();
                 inviteNotice.className = 'notice';
@@ -295,11 +607,51 @@
                 if (response.ok) {
                     inviteForm.reset();
                 }
+                if (response.ok) {
+                    document.getElementById('botDisplayName').value = 'IWKZ Bot';
+                }
                 await fetchState().catch(() => {});
             });
 
+            for (const button of tabButtons) {
+                button.addEventListener('click', () => {
+                    setActiveTab(button.dataset.tab || 'meeting-bot', { skipFocus: true });
+                });
+
+                button.addEventListener('keydown', (event) => {
+                    const index = tabButtons.indexOf(button);
+                    if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+                        event.preventDefault();
+                        const direction = event.key === 'ArrowRight' ? 1 : -1;
+                        const nextIndex = (index + direction + tabButtons.length) % tabButtons.length;
+                        setActiveTab(tabButtons[nextIndex].dataset.tab || 'meeting-bot');
+                        return;
+                    }
+
+                    if (event.key === 'Home') {
+                        event.preventDefault();
+                        setActiveTab(tabButtons[0].dataset.tab || 'meeting-bot');
+                        return;
+                    }
+
+                    if (event.key === 'End') {
+                        event.preventDefault();
+                        setActiveTab(tabButtons[tabButtons.length - 1].dataset.tab || 'meeting-bot');
+                    }
+                });
+            }
+
+            historySearch.addEventListener('input', renderHistory);
+            historyType.addEventListener('change', renderHistory);
+            historyRefresh.addEventListener('click', () => {
+                void fetchHistory({ force: true });
+            });
+
             fetchState();
+            renderHistory();
             window.setInterval(fetchState, 5000);
         </script>
     </body>
 </html>
+
+

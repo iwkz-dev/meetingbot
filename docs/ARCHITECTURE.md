@@ -106,7 +106,7 @@ flowchart TB
 | `ArtifactProcessor.ts` | Retrieve fresh signed URLs, stream video to disk, download transcript JSON, upload artifacts, and resume partial jobs. |
 | `TranscriptFormatter.ts` | Convert Recall transcript JSON into readable speaker-grouped text without summarizing or translating. |
 | `GDriveUploader.ts` | Upload exact filenames with the correct MIME type to the configured Drive folder. |
-| Control panel | Create bots, show status/history/artifact links, and request manual leave. |
+| Control panel | Create bots, show live status, browse Google Drive meeting history, and request manual leave. |
 
 ## 5. Primary workflow
 
@@ -443,6 +443,7 @@ When usage grows beyond one container, evolve the architecture in this order:
 5. Add object storage as a staging area for large media.
 6. Add user accounts, authorization, and tenant-specific Drive routing.
 7. Add scheduling and calendar integrations while retaining the same `join_at` abstraction.
+
 
 
 

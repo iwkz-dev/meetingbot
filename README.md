@@ -24,7 +24,7 @@ The app does not join meetings with a local browser anymore. It no longer depend
 - Deterministic artifact filenames.
 - Per-meeting Google Drive folder creation and reuse on retries.
 - Restart-safe upload recovery for interrupted `uploading` jobs.
-- Static-password web control panel.
+- Static-password web control panel.`r`n- Authenticated Meeting History tab that lists direct child folders from both Google Drive meeting roots.
 
 ## Final workflow
 
@@ -314,6 +314,7 @@ rg -n "playwright|puppeteer|ffmpeg|xvfb|pulseaudio|HandlerGMeet|HandlerZoom|CHRO
 ```
 
 Those strings should not appear in runtime app code for the Recall-only architecture.
+
 
 
 
